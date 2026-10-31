@@ -1,0 +1,51 @@
+{
+  "id": "pr-103-a828da9c47cc48a95348941389f7780195a8bb16",
+  "prNumber": 103,
+  "sourceSha": "a828da9c47cc48a95348941389f7780195a8bb16",
+  "controllerSha": "57daff35f455d726aa0bbf1171f192dc21a77672",
+  "deliveryConfigSha": "a828da9c47cc48a95348941389f7780195a8bb16",
+  "units": [
+    {
+      "id": "app",
+      "version": "1.0.0",
+      "tag": "v1.0.0",
+      "releaseId": null,
+      "assets": [],
+      "notesDigest": null,
+      "manifestDigest": null
+    }
+  ],
+  "requiredChannels": [],
+  "dispatches": [
+    {
+      "requestKey": "f0498792148a7e8da890f3b555ef4310f05d776df1ed24548b057282c24d7c3b",
+      "operationKey": "366bc2195b2b95567b6f6519376a57f8c99b40261b1a585154e00c3c0d7d340a",
+      "purpose": "build",
+      "workflowId": 402624393,
+      "ref": "steward/build/pr-103-a828da9c47cc48a95348941389f7780195a8bb16",
+      "sourceSha": "a828da9c47cc48a95348941389f7780195a8bb16",
+      "targetKey": "[402624393,\"steward/build/pr-103-a828da9c47cc48a95348941389f7780195a8bb16\",\"a828da9c47cc48a95348941389f7780195a8bb16\",\"a828da9c47cc48a95348941389f7780195a8bb16\",[\"app\"],[],\"build\"]",
+      "inputs": {
+        "cycle_id": "pr-103-a828da9c47cc48a95348941389f7780195a8bb16",
+        "operation_key": "366bc2195b2b95567b6f6519376a57f8c99b40261b1a585154e00c3c0d7d340a",
+        "source_sha": "a828da9c47cc48a95348941389f7780195a8bb16",
+        "controller_sha": "57daff35f455d726aa0bbf1171f192dc21a77672"
+      },
+      "inputDigest": "3f7dedda15ad86d0a506cae73136efc7e93a9652d9f12c98b8ec9f3b72b061f2",
+      "executionSha": "a828da9c47cc48a95348941389f7780195a8bb16",
+      "sentAt": "2026-10-31T09:47:50.000Z",
+      "searchWindows": [],
+      "canonicalRunId": null,
+      "nativeResponseEvidencePath": null,
+      "continuationOfRunId": null,
+      "retryLimitEvidencePath": null
+    }
+  ],
+  "publications": [],
+  "channelFacts": [],
+  "executionEvidence": [],
+  "completionObservations": [],
+  "completedEvidencePath": null,
+  "repairOf": null,
+  "approvedRepairDecision": null
+}
