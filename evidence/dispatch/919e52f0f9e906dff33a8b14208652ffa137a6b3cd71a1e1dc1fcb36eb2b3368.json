@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "repositoryId": 1440689456,
+  "cycleId": "pr-101-a828da9c47cc48a95348941389f7780195a8bb16",
+  "requestKey": "cc89116e07dd874b8a71d5d5650fbd567798190d308e9f55cc3f710109b35985",
+  "observedAt": "2026-10-31T09:39:13.803Z",
+  "kind": "READ_FAILURE",
+  "senderNonce": null,
+  "status": 404,
+  "response": null,
+  "run": null,
+  "window": null,
+  "pages": [],
+  "matches": [],
+  "errorCode": "NATIVE_HTTP_404",
+  "nextCheckAt": "2026-10-31T09:44:13.803Z"
+}
