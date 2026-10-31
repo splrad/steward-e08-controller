@@ -1,0 +1,92 @@
+name: E08 native release interface
+run-name: E08 ${{ inputs.operation_key }}
+on:
+  workflow_dispatch:
+    inputs:
+      cycle_id: {type: string, required: true}
+      operation_key: {type: string, required: true}
+      source_sha: {type: string, required: true}
+      controller_sha: {type: string, required: true}
+permissions:
+  contents: read
+jobs:
+  prepare:
+    name: channel-prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CYCLE: ${{ inputs.cycle_id }}
+      SOURCE: ${{ inputs.source_sha }}
+      ACTOR: ${{ github.actor_id }}
+      TRIGGERING: ${{ github.triggering_actor }}
+    steps:
+      - name: Verify native source and actor
+        shell: bash
+        run: |
+          test "$GITHUB_SHA" = "$SOURCE"
+          test "$ACTOR" = 350673636
+          test "$TRIGGERING" = 'splrad-e08-release[bot]'
+      - name: Exercise a waiting preparation
+        shell: bash
+        run: |
+          if [[ "$CYCLE" == pr-101-* && "$GITHUB_RUN_ATTEMPT" == 1 ]]; then
+            echo 'E08_WAIT_ZERO_BUSINESS'
+            exit 75
+          fi
+  producer:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      SOURCE: ${{ inputs.source_sha }}
+      CONTROLLER: ${{ inputs.controller_sha }}
+    steps:
+      - name: Produce synthetic bytes
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          Path('report.json').write_text(json.dumps({
+            'sourceSha':os.environ['SOURCE'],'controllerSha':os.environ['CONTROLLER'],
+            'runId':int(os.environ['GITHUB_RUN_ID']),'attempt':int(os.environ['GITHUB_RUN_ATTEMPT']),
+            'businessStatus':'pending','synthetic':True
+          })+'\n')
+          PY
+      - name: Upload synthetic evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: e08-producer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: report.json
+          if-no-files-found: error
+          retention-days: 30
+  consumer:
+    needs: producer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Record dependency execution
+        run: echo E08_CONSUMER_EXECUTED
+  collect:
+    needs: producer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CYCLE: ${{ inputs.cycle_id }}
+    steps:
+      - name: Exercise collector cancellation
+        shell: bash
+        run: |
+          if [[ "$CYCLE" == pr-104-* && "$GITHUB_RUN_ATTEMPT" == 1 ]]; then sleep 240; fi
+          echo E08_COLLECT_EXECUTED
+  automation-health:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CYCLE: ${{ inputs.cycle_id }}
+    steps:
+      - name: Exercise independent health failure
+        shell: bash
+        run: |
+          if [[ "$CYCLE" == pr-103-* && "$GITHUB_RUN_ATTEMPT" == 1 ]]; then exit 1; fi
+          echo E08_HEALTH_SUCCEEDED
