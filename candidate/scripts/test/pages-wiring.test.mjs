@@ -18,6 +18,7 @@ function fixture() {
   const run={id:12,workflow_id:5,run_attempt:1,repository:{id:10},head_repository:{id:10},path:workflow.path,head_sha:S,head_branch:'trunk',event:'push',status:'completed',conclusion:'failure',created_at:'2026-10-30T00:00:00Z',updated_at:'2026-10-30T00:01:00Z',display_title:'Pages default-branch '+S+' 12'};
   const build={id:21,run_id:12,run_attempt:1,head_sha:S,name:`build/${source.inputDigest}`,conclusion:'success',steps:[{name:'Upload Pages artifact',conclusion:'success'}]};
   const deploy={id:22,run_id:12,run_attempt:1,head_sha:S,name:`deploy/${source.inputDigest}`,conclusion:'success',steps:[{name:'Deploy Pages',conclusion:'success',completed_at:'2026-10-30T00:10:00Z'}]};
+  for(const j of [build,deploy]) Object.assign(j,{status:'completed',started_at:'2026-10-30T00:00:00Z',completed_at:'2026-10-30T00:10:00Z'});
   const artifact={id:30,name:pagesArtifactName(source,12,1),expired:false,expires_at:'2099-01-01T00:00:00Z',size_in_bytes:20,digest:'sha256:'+'e'.repeat(64),workflow_run:{id:12,head_sha:S}};
   const state={time:START,head:S,mode:'default-branch',runs:[],deployments:[],statuses:new Map(),jobs:[build,deploy],artifacts:[artifact],post:'accept',fault:null,onSave:null,saturated:false,site:null};
   const calls=[],records=new Map();
@@ -45,7 +46,11 @@ function fixture() {
     }
     if(/^\/actions\/runs\/\d+$/.test(p))return response(state.runs.find(r=>r.id===Number(p.split('/').at(-1)))??run);
     if(p==='/actions/runs/12/artifacts')return response({total_count:state.artifacts.length,artifacts:state.artifacts});
-    if(/^\/actions\/runs\/\d+\/(attempts\/1\/)?jobs$/.test(p)){const rows=state.jobs.filter(j=>j.run_id===Number(p.split('/')[3]));return response({total_count:rows.length,jobs:rows});}
+    if(/^\/actions\/runs\/\d+\/(attempts\/\d+\/)?jobs$/.test(p)){
+      const parts=p.split('/'),rows=structuredClone(state.jobs.filter(j=>j.run_id===Number(parts[3])&&(parts[4]!=='attempts'||j.run_attempt===Number(parts[5]))));
+      for(const j of rows)j.steps?.forEach((s,i)=>Object.assign(s,{number:i+1,started_at:s.started_at??null,completed_at:s.completed_at??null}));
+      return response({total_count:rows.length,jobs:rows});
+    }
     if(p==='/deployments')return response(state.deployments);
     if(/^\/deployments\/\d+\/statuses$/.test(p))return response(state.statuses.get(Number(p.split('/')[2]))??[]);
     throw Error('unregistered fixture '+method+' '+path);
@@ -65,7 +70,8 @@ test('native YAML separates source, secret-free build and Pages deployment with 
   assert.deepEqual(d.jobs.deploy.permissions,{contents:'read',actions:'read',attestations:'read',deployments:'read',pages:'write','id-token':'write'});
   assert.equal(d.concurrency.queue,'max');assert.equal(d.concurrency['cancel-in-progress'],false);
   assert.equal(d.on.push.paths,undefined);assert.deepEqual(d.on.push.branches,['**']);assert.equal(d.jobs.deploy.steps.filter(s=>s.uses?.startsWith('actions/checkout@')).length,1);
-  assert.equal(d.jobs.build.steps.find(s=>s.name==='Upload Pages artifact').with.name,d.jobs.deploy.steps.find(s=>s.name==='Deploy Pages').with.artifact_name);
+  assert.equal(d.jobs.build.steps.find(s=>s.name==='Upload Pages artifact').with.name,'github-pages-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.select.outputs.input_digest }}');
+  assert.equal(d.jobs.deploy.steps.find(s=>s.name==='Deploy Pages').with.artifact_name,'${{ steps.guard.outputs.artifact_name }}');
   assert.doesNotMatch(bytes.toString(),/secrets\.|pull_request_target|workflow_run|deployment_id/);
 });
 test('rejects drifted controller pins, missing build dependency and concurrent cancellation',()=>{
@@ -76,6 +82,16 @@ test('rejects drifted controller pins, missing build dependency and concurrent c
 test('actual Contents bytes select the immutable product pin; default mode needs no VERSION or Release',async()=>{
   const f=fixture();f.options.controllerSha=N;assert.deepEqual((await currentPagesSource(f.options)).source,f.source);
   assert.ok(f.calls.every(c=>!c.path.includes('VERSION')&&!c.path.includes('/releases')));
+});
+test('deploy-only rerun resolves the retained build to its original artifact name and ID',async()=>{
+  const f=fixture();f.run.run_attempt=2;f.state.jobs.push({...structuredClone(f.build),id:121,run_attempt:2});
+  const result=await checkPagesArtifact(f.reader,f.source,{runId:12,attempt:2,artifactId:30});
+  assert.equal(result.buildJobId,21);assert.equal(result.runAttempt,1);assert.equal(result.artifactName,f.artifact.name);
+});
+test('retained deployment projections preserve the original deployment job even with a Run-only URL',async()=>{
+  const f=fixture();f.run.run_attempt=2;f.successful();f.state.jobs.push({...structuredClone(f.deploy),id:122,run_attempt:2});
+  f.state.statuses.get(40)[0].log_url='https://github.com/fixture/product/actions/runs/12';
+  const result=await pagesDeployment(f.reader,f.source);assert.equal(result.jobId,22);assert.equal(result.runAttempt,1);
 });
 test('accepts an exact same-Run current-attempt artifact with successful native build proof',async()=>{
   const f=fixture();const result=await preflightPages({reader:f.reader,source:f.source,options:f.options,invocation:{runId:12,attempt:1,artifactId:30}});

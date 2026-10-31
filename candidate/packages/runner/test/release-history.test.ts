@@ -16,7 +16,7 @@ function fixture() {
   const calls:string[]=[],ordinary=Array.from({length:200},(_,i)=>({id:i+1,number:i+1000,head:{ref:'ordinary'},base:{ref:'main'}}));let headReads=0,moving=false,denied=false;
   const io={async request(method:'GET'|'POST',path:string) {
     expect(method).toBe('GET');calls.push(path);
-    if(path==='/repos/example/product/')return f.response({id:1,full_name:'example/product',default_branch:'main',archived:false,disabled:false});
+    if(path==='/repos/example/product')return f.response({id:1,full_name:'example/product',default_branch:'main',archived:false,disabled:false});
     if(path.includes('/commits/main'))return f.response({sha:moving&&headReads++>0?C:S});
     if(path.endsWith('/git/ref/heads/steward/release-state'))return f.response({object:{sha:D}});
     if(path.includes('pulls?state=closed')) {

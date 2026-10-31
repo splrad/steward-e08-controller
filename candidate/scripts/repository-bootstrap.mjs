@@ -17,7 +17,13 @@ const log={debug(){},info(){},warn(){},error(){}};
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const positive=value=>Number.isSafeInteger(value)&&value>0;
 export function bootstrapNativeIO(token,transport=fetch) {
-  const client=new Octokit({auth:token,log,request:{fetch:transport,headers:{'x-github-api-version':'2026-03-10'}}});
+  const nativeFetch=(url,init)=>{
+    // Octokit's URL template parser removes the slash required by GitHub's all-refs endpoint.
+    const target=new URL(String(url));
+    if(init?.method==='GET'&&target.origin==='https://api.github.com'&&/^\/repos\/[^/]+\/[^/]+\/git\/matching-refs$/.test(target.pathname))target.pathname+='/';
+    return transport(target,init);
+  };
+  const client=new Octokit({auth:token,log,request:{fetch:nativeFetch,headers:{'x-github-api-version':'2026-03-10'}}});
   client.hook.before('request',options=>{options.headers['x-github-api-version']='2026-03-10';});
   return {async request(method,path,body){
     try {const r=await client.request(`${method} ${path}`,{...body,request:{signal:AbortSignal.timeout(60_000)}});
@@ -42,7 +48,10 @@ function qualityIO(io) {return {async get(path){return {value:await get(io,path)
 export async function verifyGovernanceCreation(io,repository,appId) {
   const summaries=await pages(io,`/repos/${repository.full_name}/rulesets?includes_parents=true`),found=new Set();
   for(const summary of summaries) {
-    const rule=await get(io,`/repos/${repository.full_name}/rulesets/${summary.id}`);
+    const projected=await get(io,`/repos/${repository.full_name}/rulesets/${summary.id}`);
+    // Repository projections omit organization repository-name conditions.
+    const rule=projected.source_type==='Organization'&&projected.source==='splrad'
+      ?await get(io,`/orgs/splrad/rulesets/${summary.id}`):projected;
     if(rule.enforcement!=='active'||rule.target!=='branch'||JSON.stringify(rule.conditions?.ref_name?.include)!==JSON.stringify([`refs/heads/${branch}`]))continue;
     check(rule.id===summary.id&&JSON.stringify(rule.conditions.ref_name.exclude)==='[]','STATE_RULE');
     check(rule.source_type==='Organization'&&rule.source==='splrad'&&JSON.stringify(rule.conditions.repository_name?.include)==='["~ALL"]'

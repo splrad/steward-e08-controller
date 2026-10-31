@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { nativeGhCommand, NativeGitHubRelease, nativeReleaseDownload, type GhCommand, type ReleaseDownload } from './gh-release.js';
 import { localGitSnapshot } from './git-snapshot.js';
 import { selectReleaseProducers, producerArtifactName } from './release-run.js';
+import { jobFact } from './native-release-evidence.js';
+import { originalJobExecutions, type NativeJobAttempt } from '../../core/src/native-job-origins.js';
 import { verifySealedArtifacts, validateReleaseManifest, fileDigest, type ReleaseManifest } from './release-artifacts.js';
 import { nativeReleaseInspector } from './release-native.js';
 import { committedVersionNotes } from '../../core/src/release-template.js';
@@ -387,13 +389,16 @@ export async function pipelineProducers(record: PipelineSource, gh: GhCommand = 
   if (run.id !== record.runId || run.repository?.id !== record.repositoryId || run.head_repository?.id !== record.repositoryId
     || run.head_sha !== record.sourceSha || run.event !== record.event || run.run_attempt !== record.attempt) fail('run identity');
   const jobs: Parameters<typeof selectReleaseProducers>[2]['jobs'] = [];
+  const attempts: NativeJobAttempt[] = [];
   for (let attempt = 1; attempt <= record.attempt; attempt++) {
-    for (const job of await pages(`repos/${record.fullName}/actions/runs/${record.runId}/attempts/${attempt}/jobs?per_page=100`, 'jobs')) {
-      const build = record.unit.builds.find(build => job.name === build.jobName); if (!build) continue;
-      if (job.run_id !== record.runId || job.head_sha !== record.sourceSha) fail('producer job source');
-      jobs.push({ id: job.id, runId: job.run_id, attempt, buildId: build.id, sourceSha: job.head_sha, controllerSha: record.controllerSha, status: job.status, conclusion: job.conclusion });
-    }
+    const native = await pages(`repos/${record.fullName}/actions/runs/${record.runId}/attempts/${attempt}/jobs?per_page=100`, 'jobs');
+    if (native.some(job => job.run_id !== record.runId || job.head_sha !== record.sourceSha || job.run_attempt !== attempt)) fail('producer job source');
+    attempts.push({ attempt, jobs: native.map(jobFact) });
   }
+    for (const job of originalJobExecutions(attempts)) {
+      const build = record.unit.builds.find(build => job.name === build.jobName); if (!build) continue;
+      jobs.push({ id: job.id, runId: job.runId, attempt: job.runAttempt, buildId: build.id, sourceSha: job.headSha, controllerSha: record.controllerSha, status: job.status, conclusion: job.conclusion });
+    }
   const artifacts = await pages(`repos/${record.fullName}/actions/runs/${record.runId}/artifacts?per_page=100`, 'artifacts');
   const after = JSON.parse(await gh(['api', `repos/${record.fullName}/actions/runs/${record.runId}`]));
   for (const key of ['id', 'head_sha', 'event', 'run_attempt', 'status', 'updated_at']) {

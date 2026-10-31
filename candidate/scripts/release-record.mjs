@@ -569,7 +569,7 @@ export async function publishNativeCycle(request,{token,io=nativeEvidenceTranspo
 }
 
 export async function assertReleaseWriterProtection(repository,branch,io) {
-  const native=async path=>{const response=await io.request('GET',`/repos/${repository}/${path}`);if(response.status!==200)fail('writer protection read unavailable');return JSON.parse(Buffer.from(response.bytes).toString('utf8'));};
+  const native=async path=>{const response=await io.request('GET',`/repos/${repository}${path?'/'+path:''}`);if(response.status!==200)fail('writer protection read unavailable');return JSON.parse(Buffer.from(response.bytes).toString('utf8'));};
     const rules=await native(`rules/branches/${encodeURIComponent(branch)}`);
     if(!Array.isArray(rules)||!['creation','update','deletion'].every(type=>rules.some(rule=>rule.type===type&&Number.isSafeInteger(rule.ruleset_id))))fail('protected writer rules');
     const ids=[...new Set(rules.filter(rule=>['creation','update','deletion'].includes(rule.type)).map(rule=>rule.ruleset_id))];
@@ -583,7 +583,7 @@ export async function assertReleaseWriterProtection(repository,branch,io) {
 /** Fixed Git/native history reader. E05/E06 supply fresh source/channel observations through one trusted I/O boundary. */
 export async function inspectRepositoryHistory(request,{token,io=nativeEvidenceTransport(token),completionReader,now=()=>new Date().toISOString()}={}) {
   let snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId});
-  const native=async path=>{const response=await io.request('GET',`/repos/${request.repository}/${path}`);if(response.status!==200)fail('history native read');return JSON.parse(Buffer.from(response.bytes).toString('utf8'));};
+  const native=async path=>{const response=await io.request('GET',`/repos/${request.repository}${path?'/'+path:''}`);if(response.status!==200)fail('history native read');return JSON.parse(Buffer.from(response.bytes).toString('utf8'));};
   if(snapshot.repository?.schemaVersion!==3)return {result:'UNKNOWN',inventoryComplete:false,reason:'RELEASE_ADOPTION_REQUIRED'};
   const recovered=await recoverReleaseCaches(request,snapshot,{token,io,now});snapshot=recovered.snapshot;request={...request,directory:recovered.directory};
   return withReleaseAdoption(request,snapshot.repository.releaseAdoption,io,async({defaultHead,reachable,verifySource})=>{
@@ -684,7 +684,7 @@ export async function releaseCommand(command,request,{token,io=nativeEvidenceTra
   if(command==='dispatch-channel' && cycle.units.some(unit=>unit.releaseId===null||unit.manifestDigest===null))return wait('FROZEN_RELEASE_REQUIRED');
   if(command==='dispatch-channel'&&centralIo) {const normalized=await ensureCycleDelivery(request,snapshot,cycle,{token,io,centralIo,now});snapshot=normalized.snapshot;directory=normalized.directory;request={...request,directory};}
   const native=async path=>{
-    const response=await io.request('GET',`/repos/${request.repository}/${path}`);
+    const response=await io.request('GET',`/repos/${request.repository}${path?'/'+path:''}`);
     if(response.status!==200)fail(`native read ${response.status}`);
     return JSON.parse(Buffer.from(response.bytes).toString('utf8'));
   };

@@ -3,7 +3,7 @@ import {join,resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import YAML from 'yaml';
-import {NativeEvidenceReader,maintenanceWorkflows,maintenanceJobKeys,maintenanceDisposition,maintenanceFailed,decodeMaintenanceRecord,assertMaintenanceProgress} from '../packages/runner/dist/index.js';
+import {NativeEvidenceReader,jobFact,originalJobExecutions,maintenanceWorkflows,maintenanceJobKeys,maintenanceDisposition,maintenanceFailed,decodeMaintenanceRecord,assertMaintenanceProgress} from '../packages/runner/dist/index.js';
 import {writeReleaseRecords} from './release-record.mjs';
 
 const repository='splrad/steward',repositoryId=1296724484;
@@ -41,7 +41,10 @@ function source(run,workflow,definition,branch) {
 }
 function jobsProjection(raw,run,definition) {
   check(Array.isArray(raw)&&raw.length>0&&new Set(raw.map(j=>j.id)).size===raw.length,'JOBS');
-  return raw.map(j=>{
+  for(const j of raw) check(j.run_id===run.id&&j.head_sha===run.head_sha&&positive(j.run_attempt)&&j.run_attempt<=run.run_attempt,'JOB_SOURCE');
+  const originals=new Set(originalJobExecutions(Array.from({length:run.run_attempt},(_,i)=>({attempt:i+1,
+    jobs:raw.filter(j=>j.run_attempt===i+1).map(jobFact)}))).map(j=>j.id));
+  return raw.filter(j=>originals.has(j.id)).map(j=>{
     check(positive(j.id)&&j.run_id===run.id&&j.head_sha===run.head_sha&&positive(j.run_attempt)&&j.run_attempt<=run.run_attempt
       &&j.status==='completed'&&Array.isArray(j.steps),'JOB_SOURCE');
     let key=Object.keys(definition.names).find(k=>definition.names[k]===j.name),matrixIndex=null;

@@ -33,7 +33,7 @@ async function fixture() {
   const stateHead=async()=>(await git('ls-remote','--heads','--refs',remote,'refs/heads/steward/release-state')).split('\t')[0]||null;
   const io={async request(method:string,path:string) {
     expect(method).toBe('GET');let value:any,status=200;const url=new URL(path,'https://api.github.com'),p=url.pathname;
-    if(p==='/repos/splrad/LayerScape/')value={id:request.repositoryId,full_name:request.repository,default_branch:'main',archived:false,disabled:false};
+    if(p==='/repos/splrad/LayerScape')value={id:request.repositoryId,full_name:request.repository,default_branch:'main',archived:false,disabled:false};
     else if(p.endsWith('/pulls/7'))value=pull;
     else if(/\/pulls\/[0-9]+$/.test(p)&&closed.some(pr=>p.endsWith('/pulls/'+pr.number)))value=closed.find(pr=>p.endsWith('/pulls/'+pr.number));
     else if(p.endsWith('/commits/main'))value={sha:await git('rev-parse','main')};

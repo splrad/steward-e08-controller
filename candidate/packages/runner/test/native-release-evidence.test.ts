@@ -1,9 +1,28 @@
 import { expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { archiveFile, inspectNativeCycle, recoverNativeCycle, nativeEvidenceTransport, nativeRequestIdentity, nativeRunFact, jobFact } from '../src/native-release-evidence.js';
+import { archiveFile, inspectNativeCycle, recoverNativeCycle, nativeEvidenceTransport, nativeRequestIdentity, nativeRunFact, jobFact, NativeEvidenceReader } from '../src/native-release-evidence.js';
 import { channelEvidenceFile, channelTargetsDigest } from '../src/release-run.js';
 import { decodeStateFile } from '../../core/src/release-observation.js';
 import { evidenceFixture, NOW, D, S, digest, zipResult } from './native-evidence-fixture.js';
+
+it('uses the canonical repository endpoint because GitHub rejects its trailing-slash variant',async()=>{
+  const calls:string[]=[];
+  const io=nativeEvidenceTransport('fixture-token',async(url:any)=>{
+    calls.push(String(url));return new Response(JSON.stringify({id:1}),{status:String(url)==='https://api.github.com/repos/example/product'?200:404});
+  });
+  expect(await new NativeEvidenceReader(io,'example/product').json('')).toEqual({id:1});
+  expect(calls).toEqual(['https://api.github.com/repos/example/product']);
+});
+it('permits native created-time ranges in queries while rejecting encoded path traversal',async()=>{
+  const calls:string[]=[],io=nativeEvidenceTransport('fixture-token',async(url:any)=>{
+    calls.push(String(url));return new Response('{}',{status:200});
+  });
+  const path='/repos/example/product/actions/runs?created=2026-10-31T09%3A00%3A00Z..2026-10-31T10%3A00%3A00Z';
+  expect((await io.request('GET',path)).status).toBe(200);expect(calls).toEqual(['https://api.github.com'+path]);
+  for(const bad of ['/repos/example/../product','/repos/example/%2e%2e/product','/repos/example/%5c..%5cproduct','/repos/example/product#fragment'])
+    await expect(io.request('GET',bad)).rejects.toThrow('API path');
+  expect(calls).toHaveLength(1);
+});
 
 it('reads every native attempt and counts actual failures once per wave from original logs',async()=>{
   const f=evidenceFixture(2),r=await inspectNativeCycle(f.context,[],f.io,NOW);
@@ -11,13 +30,27 @@ it('reads every native attempt and counts actual failures once per wave from ori
   expect(r.archives).toHaveLength(2);expect(r.archives[0]!.logs[0]!.digest).toMatch(/^[a-f0-9]{64}$/);
   expect(f.calls.some(call=>call.includes('/attempts/1/jobs'))).toBe(true);expect(f.calls.every(call=>call.startsWith('GET'))).toBe(true);
 });
+it('keeps raw retained job projections while counting their original business execution only once, including expiry',async()=>{
+  const f=evidenceFixture(2);
+  f.jobs.set(2,[{...structuredClone(f.jobs.get(1)![0]),id:2000,run_attempt:2}]);
+  const result=await inspectNativeCycle(f.context,[],f.io,NOW);
+  expect(result.budget).toMatchObject({remaining:2,unknownEvidence:[],conflictEvidence:[]});
+  expect(result.budget.failedWaveKeys).toHaveLength(1);
+  expect(result.archives[1]!.jobs[0]!.id).toBe(2000);expect(result.native.attempts[1]!.jobs).toEqual([]);
+  expect(f.calls.some(call=>call.includes('/jobs/2000/logs'))).toBe(false);
+  const history=result.archives.map(value=>({...archiveFile(value),commit:D,value}));
+  f.overrides.set('GET /repos/example/product/actions/runs/100',f.response({},410));
+  const expired=await inspectNativeCycle(f.context,history,f.io,NOW);
+  expect(expired.budget).toMatchObject({remaining:2,unknownEvidence:[],conflictEvidence:[]});
+  expect(expired.archived[1]!.attempt.jobs).toEqual([]);
+});
 it('preserves repository ID, original Run, source and budget across rename and visibility changes, including archived native history',async()=>{
   const f=evidenceFixture(2),before=JSON.stringify(f.context.cycle),original=await inspectNativeCycle(f.context,[],f.io,NOW);
   const history=original.archives.map(value=>({...archiveFile(value),commit:D,value}));
   f.context.repository='example/renamed';
-  const io={...f.io,request:async(method:'GET'|'POST',path:string,limit?:number,body?:object)=>f.io.request(method,path.replace('/repos/example/renamed/','/repos/example/product/'),limit,body)};
+  const io={...f.io,request:async(method:'GET'|'POST',path:string,limit?:number,body?:object)=>f.io.request(method,path.replace('/repos/example/renamed','/repos/example/product'),limit,body)};
   for(const visibility of ['private','public']) {
-    f.overrides.set('GET /repos/example/product/',f.response({id:1,full_name:'example/renamed',default_branch:'main',archived:false,disabled:false,visibility}));
+    f.overrides.set('GET /repos/example/product',f.response({id:1,full_name:'example/renamed',default_branch:'main',archived:false,disabled:false,visibility}));
     const live=await inspectNativeCycle(f.context,history,io,NOW);expect(live.budget).toEqual(original.budget);
   }
   f.overrides.set('GET /repos/example/product/actions/runs/100',f.response({},410));
@@ -27,9 +60,9 @@ it('preserves repository ID, original Run, source and budget across rename and v
 });
 it.each(['archived','disabled','replacement-id','uninstalled'])('stops %s evidence reads and resumes the original objects after access is restored',async mode=>{
   const f=evidenceFixture(2),repo={id:1,full_name:'example/product',default_branch:'main',archived:false,disabled:false};
-  f.overrides.set('GET /repos/example/product/',f.response({...repo,archived:mode==='archived',disabled:mode==='disabled',id:mode==='replacement-id'?2:1},mode==='uninstalled'?403:200));
+  f.overrides.set('GET /repos/example/product',f.response({...repo,archived:mode==='archived',disabled:mode==='disabled',id:mode==='replacement-id'?2:1},mode==='uninstalled'?403:200));
   await expect(inspectNativeCycle(f.context,[],f.io,NOW)).rejects.toThrow();
-  expect(f.calls).toEqual(['GET /repos/example/product/']);f.overrides.clear();
+  expect(f.calls).toEqual(['GET /repos/example/product']);f.overrides.clear();
   const restored=await inspectNativeCycle(f.context,[],f.io,NOW);expect(restored.budget.remaining).toBe(1);expect(f.request.canonicalRunId).toBe(100);
   expect(f.calls.some(x=>x.startsWith('POST'))).toBe(false);
 });

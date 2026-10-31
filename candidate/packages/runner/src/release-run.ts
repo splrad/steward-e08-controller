@@ -7,6 +7,7 @@ import { isolatedBuildEnvironment } from './build-environment.js';
 import { parseDeliveryConfig } from '../../core/src/delivery-config.js';
 import { join } from 'node:path';
 import { downloadNativeArtifact } from './native-artifact-download.js';
+import { nativeJobOrigins } from '../../core/src/native-job-origins.js';
 import { parseDocument } from 'yaml';
 import { parseReleaseRecord, type CycleRecord } from '../../core/src/release-observation.js';
 import { decodeNativeDispatchObservation, decodeNativeSourceRejection, type NativeSourceRejection, type NativeDispatchObservation, type NativeRun } from '../../core/src/native-evidence.js';
@@ -626,13 +627,20 @@ export function channelEvidenceFile(value:NativeChannelEvidence):ArchiveFile {
 /** Read only artifacts produced by the exact trusted job, including upload responses lost before collect. */
 export async function readChannelArtifacts(context:EvidenceContext,run:NativeRun,targets:ChannelTarget[],request:Dispatch|null,
   root:string,controllerDirectory:string,token:string,io:EvidenceTransport,now:string) {
-  const reader=new NativeEvidenceReader(io,context.repository),jobs=(await reader.pages(`actions/runs/${run.id}/attempts/${run.runAttempt}/jobs`,'jobs')).map(jobFact),
+  const reader=new NativeEvidenceReader(io,context.repository),attempts=await reader.jobAttempts(run.id,run.runAttempt),
+    jobs=nativeJobOrigins(attempts).filter(({job})=>job.runAttempt===run.runAttempt).map(({origin})=>origin),
     artifacts=await reader.pages(`actions/runs/${run.id}/artifacts`,'artifacts'),files:ArchiveFile[]=[],reads:ChannelReadItem[]=[],results:ChannelResultItem[]=[];
+  if(jobs.some(job=>job.headSha!==run.headSha))fail('channel job source');
   const digest=channelTargetsDigest(context,targets),expected=request
-    ?targets.map(target=>({name:`channel-${request.requestKey}-${target.unitId}-${target.channelId}-${run.id}-${run.runAttempt}`,job:`${request.inputs.mode}/${target.channelId}/${target.unitId}`}))
-    :[{name:`probe-${context.cycle.id}-${digest}-${run.id}-${run.runAttempt}`,job:'observe'}];
+    ?targets.map(target=>({prefix:`channel-${request.requestKey}-${target.unitId}-${target.channelId}-${run.id}`,job:`${request.inputs.mode}/${target.channelId}/${target.unitId}`}))
+    :[{prefix:`probe-${context.cycle.id}-${digest}-${run.id}`,job:'observe'}];
   for(const entry of expected) {
-    const matching=artifacts.filter(artifact=>artifact.name===entry.name),nativeJobs=jobs.filter(job=>job.name===entry.job);
+    const nativeJobs=jobs.filter(job=>job.name===entry.job);
+    if(!nativeJobs.length)continue;
+    if(nativeJobs.length!==1)fail('ambiguous channel artifact');
+    const originRun=nativeJobs[0]!.runAttempt===run.runAttempt?run:nativeRunFact(await reader.json(`actions/runs/${run.id}/attempts/${nativeJobs[0]!.runAttempt}`));
+    if(originRun.id!==run.id||originRun.runAttempt!==nativeJobs[0]!.runAttempt||originRun.headSha!==run.headSha||originRun.workflowId!==run.workflowId)fail('channel origin run');
+    const matching=artifacts.filter(artifact=>artifact.name===`${entry.prefix}-${originRun.runAttempt}`);
     if(!matching.length)continue;
     if(matching.length!==1||nativeJobs.length!==1)fail('ambiguous channel artifact');
     const artifact=matching[0],job=nativeJobs[0]!;
@@ -647,9 +655,9 @@ export async function readChannelArtifacts(context:EvidenceContext,run:NativeRun
     const current=await reader.json(`actions/artifacts/${artifact.id}`);
     if(JSON.stringify([current.id,current.name,current.digest,current.workflow_run,current.created_at,current.expired])!==JSON.stringify([artifact.id,artifact.name,artifact.digest,artifact.workflow_run,artifact.created_at,artifact.expired]))fail('channel artifact changed');
     const value:NativeChannelEvidence={schemaVersion:1,repositoryId:context.repositoryId,cycleId:context.cycle.id,sourceSha:context.cycle.sourceSha,observedAt:now,
-      kind:request?'RESULT':'PROBE',run,job,artifact:{id:artifact.id,name:artifact.name,digest:artifact.digest,createdAt:artifact.created_at},payload};
-    if(request)results.push(verifyChannelResult(context,request,run,job,JSON.parse(payload)));
-    else {const checked=verifyChannelProbe(context,targets,JSON.parse(payload),run,job,now);if(checked.fresh)reads.push(...checked.report.items);}
+      kind:request?'RESULT':'PROBE',run:originRun,job,artifact:{id:artifact.id,name:artifact.name,digest:artifact.digest,createdAt:artifact.created_at},payload};
+    if(request)results.push(verifyChannelResult(context,request,originRun,job,JSON.parse(payload)));
+    else {const checked=verifyChannelProbe(context,targets,JSON.parse(payload),originRun,job,now);if(checked.fresh)reads.push(...checked.report.items);}
     files.push(channelEvidenceFile(value));
   }
   return {files,reads,results};

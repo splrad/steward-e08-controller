@@ -24,16 +24,18 @@ export function evidenceFixture(attempts=1) {
   const workflowBytes=Buffer.from(workflow),blobSha=createHash('sha1').update(`blob ${workflowBytes.length}\0`).update(workflowBytes).digest('hex');
   const response=(value:unknown,status=200,headers:Record<string,string>={}):EvidenceResponse=>({status,headers:new Headers(headers),bytes:typeof value==='string'?Buffer.from(value):Buffer.from(JSON.stringify(value))});
   for(let attempt=1;attempt<=attempts;attempt++) {
+    const start=new Date(Date.parse(START)+(attempt-1)*1000).toISOString(),end=new Date(Date.parse(END)+(attempt-1)*1000).toISOString();
     runs.set(attempt,{id:100,repository:{id:1},head_repository:{id:1},workflow_id:10,path:'.github/workflows/steward-release-publish.yml',event:'workflow_dispatch',head_sha:S,head_branch:request.ref,actor:{id:42},triggering_actor:{id:42},run_attempt:attempt,status:'completed',conclusion:'failure',created_at:START,updated_at:END,display_title:`Build ${request.operationKey}`});
-    jobs.set(attempt,[{id:attempt*1000,run_id:100,run_attempt:attempt,head_sha:S,name:'build',status:'completed',conclusion:'failure',started_at:START,completed_at:END,steps:[{number:2,name:'business-build',started_at:START,completed_at:END,conclusion:'failure'}]}]);
+    jobs.set(attempt,[{id:attempt*1000,run_id:100,run_attempt:attempt,head_sha:S,name:'build',status:'completed',conclusion:'failure',started_at:start,completed_at:end,steps:[{number:2,name:'business-build',started_at:start,completed_at:end,conclusion:'failure'}]}]);
     const execution={repositoryId:1,cycleId:cycle.id,workflowId:10,runId:100,runAttempt:attempt,entry:'build' as const,jobId:attempt*1000,unitId:'app',channelId:null,inputDigest:request.inputDigest,
-      invocationKey:digest(JSON.stringify([1,cycle.id,10,100,attempt,'build',attempt*1000,2,'app',null,request.inputDigest])),startedAt:START,businessStartedProven:true,nativeEvidencePath:'evidence/native.json',outcome:'BUSINESS_FAILED' as const,completedAt:END,objectEvidencePaths:[],observedAt:END};
+      invocationKey:digest(JSON.stringify([1,cycle.id,10,100,attempt,'build',attempt*1000,2,'app',null,request.inputDigest])),startedAt:start,businessStartedProven:true,nativeEvidencePath:'evidence/native.json',outcome:'BUSINESS_FAILED' as const,completedAt:end,objectEvidencePaths:[],observedAt:end};
     results.set(attempt,{schemaVersion:1,sourceSha:S,executionSha:S,stepNumber:2,reasonCode:'RESULT',execution,objects:[]});
   }
   const io:EvidenceTransport={async request(method,path) {
     calls.push(`${method} ${path}`);
     const override=overrides.get(`${method} ${path}`);if(override)return typeof override==='function'?override():override;
-    const suffix=path.replace('/repos/example/product/','');
+    if(path==='/repos/example/product/')return response({message:'Not Found'},404);
+    const suffix=path==='/repos/example/product'?'':path.replace('/repos/example/product/','');
     if(method==='POST') {
       if(accepted) {latest++;runs.set(latest,{...runs.get(latest-1),run_attempt:latest,status:'queued',conclusion:null});}
       if(throwPost)throw new Error('secret-shaped transport failure');return response('',201);
@@ -48,7 +50,7 @@ export function evidenceFixture(attempts=1) {
     match=/^actions\/jobs\/(\d+)\/logs$/.exec(suffix);
     if(match) {if(!logs)return response({},410);const n=Number(match[1])/1000,result=results.get(n)!;
       const start=structuredClone(result);start.execution.outcome=null;start.execution.completedAt=null;
-      return response(`${START} BUSINESS_STARTED ${JSON.stringify(start)}\n${END} STEWARD_RESULT ${JSON.stringify(result)}\n`);}
+      return response(`${result.execution.startedAt} BUSINESS_STARTED ${JSON.stringify(start)}\n${result.execution.completedAt} STEWARD_RESULT ${JSON.stringify(result)}\n`);}
     match=/^actions\/artifacts\/(\d+)(\/zip)?$/.exec(suffix);
     if(match){const id=Number(match[1]),item=artifacts.find(a=>a.id===id);if(!item)return response({},404);return match[2]?{status:200,headers:new Headers(),bytes:downloads.get(id)!}:response(item);}
     throw new Error('Unexpected fixture endpoint: '+suffix);
@@ -56,7 +58,7 @@ export function evidenceFixture(attempts=1) {
   const saved:string[]=[],store:EvidenceStore={async archive(files){saved.push(...files.map(f=>f.path));calls.push('ARCHIVE_READBACK');return {status:'APPLIED',head:D,records:files.filter(file=>file.path.startsWith('evidence/native/')).map(file=>({path:file.path,commit:D,value:JSON.parse(file.content)}))};}};
   function artifact(attempt=1,value:unknown=results.get(attempt),name?:string) {
     const id=700+artifacts.length,bytes=zipResult(value);downloads.set(id,bytes);
-    artifacts.push({id,name:name??`steward-result-100-${attempt}-${attempt*1000}-2`,expired:false,workflow_run:{id:100,head_sha:S},digest:`sha256:${digest(bytes)}`,size_in_bytes:bytes.length,created_at:END,expires_at:'2026-12-01T00:00:00Z'});return id;
+    artifacts.push({id,name:name??`steward-result-100-${attempt}-${attempt*1000}-2`,expired:false,workflow_run:{id:100,head_sha:S},digest:`sha256:${digest(bytes)}`,size_in_bytes:bytes.length,created_at:results.get(attempt)!.execution.completedAt,expires_at:'2026-12-01T00:00:00Z'});return id;
   }
   return {context,request,io,store,calls,saved,runs,jobs,results,artifacts,downloads,overrides,response,artifact,setLogs:(value:boolean)=>{logs=value;},setAccepted:(value=true)=>{accepted=value;},setThrowPost:()=>{throwPost=true;}};
 }

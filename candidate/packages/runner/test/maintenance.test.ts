@@ -10,7 +10,8 @@ const S='a'.repeat(40),T='b'.repeat(40),at='2026-10-31T00:00:00.000Z',now=()=>Da
 const coordinator={runId:900,runAttempt:1,controllerSha:T};
 const response=(value:any,status=200,headers:Record<string,string>={})=>({status,headers:new Headers(headers),bytes:Buffer.from(JSON.stringify(value))});
 function job(id:number,name:string,attempt=1,conclusion='failure') {
-  return {id,name,run_id:12,run_attempt:attempt,head_sha:S,status:'completed',conclusion,steps:[] as any[]};
+  return {id,name,run_id:12,run_attempt:attempt,head_sha:S,status:'completed',conclusion,
+    started_at:new Date(Date.parse(at)+attempt*60000).toISOString(),completed_at:new Date(Date.parse(at)+attempt*60000+1000).toISOString(),steps:[] as any[]};
 }
 async function fixture(file='settings-sync.yml') {
   const definition=await api.maintenanceDefinition(file),workflow={id:5,path:'.github/workflows/'+file,state:'active'};
@@ -30,7 +31,8 @@ async function fixture(file='settings-sync.yml') {
     if(path.includes('/actions/runs/12/jobs?')) {
       const page=Number(new URL('https://api.github.com'+path).searchParams.get('page')??1),slice=f.jobs.slice((page-1)*100,page*100);
       const headers=page*100<f.jobs.length?{link:`<https://api.github.com/repos/splrad/steward/actions/runs/12/jobs?filter=all&per_page=100&page=${page+1}>; rel="next"`}:{};
-      return response({total_count:f.jobs.length,jobs:structuredClone(slice)},200,headers);
+      const rows=structuredClone(slice);for(const j of rows)j.steps?.forEach((s:any,i:number)=>Object.assign(s,{number:i+1,started_at:s.started_at??null,completed_at:s.completed_at??null}));
+      return response({total_count:f.jobs.length,jobs:rows},200,headers);
     }
     throw Error('unregistered GET '+path);
   }};
@@ -56,6 +58,15 @@ it('stops after two recoveries and three actual failed business waves',async()=>
   f.run.status='completed';f.run.conclusion='failure';f.jobs.push(job(3,'settings-sync',3));
   expect((await f.execute()).status).toBe('EXHAUSTED');expect(f.posts()).toHaveLength(2);
   expect(f.records.get(12).jobs).toHaveLength(3);
+});
+it('retains original maintenance job IDs after a health-only rerun creates new projection IDs',async()=>{
+  const f=await fixture('update-dependencies.yml');
+  f.run.run_attempt=2;f.run.conclusion='success';
+  for(const j of f.jobs)j.conclusion='success';
+  f.jobs[0].steps=[{name:'update-targets-empty',conclusion:'skipped'},{name:'update-targets-found',conclusion:'success'}];
+  const prior=structuredClone(f.jobs);
+  f.jobs.push(...prior.map((j:any)=>j.name==='automation-health'?{...job(j.id+100,j.name,2,'success')}:({...j,id:j.id+100,run_attempt:2})));
+  expect(await f.execute()).toEqual({status:'SATISFIED'});expect(f.posts()).toHaveLength(0);
 });
 it('counts earlier manual business failures rather than resetting budget when no cache exists',async()=>{
   const f=await fixture();f.run.run_attempt=3;f.jobs.push(job(2,'settings-sync',2),job(3,'settings-sync',3));

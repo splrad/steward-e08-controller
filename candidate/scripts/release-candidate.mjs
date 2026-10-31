@@ -36,7 +36,7 @@ export async function nativeReleaseCandidate(request, { token, readToken, copilo
     const bytes = Buffer.from(await response.arrayBuffer()); if (bytes.length > 16 * 1024 * 1024) fail('CANDIDATE_NATIVE_RESPONSE_LIMIT');
     return bytes.length ? JSON.parse(bytes.toString('utf8')) : null;
   };
-  const native = path => api('GET', `/repos/${request.repository}/${path}`);
+  const native = path => api('GET', `/repos/${request.repository}${path?'/'+path:''}`);
   const pages = async path => {
     const all = [], seen = new Set();
     for (let page = 1; page <= 10000; page++) {

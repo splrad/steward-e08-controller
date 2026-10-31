@@ -2,7 +2,7 @@ import {readFile,writeFile,appendFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import YAML from 'yaml';
-import {NativeEvidenceReader,nativeEvidenceTransport,validatePagesSource} from '../packages/runner/dist/index.js';
+import {NativeEvidenceReader,nativeEvidenceTransport,validatePagesSource,jobFact,nativeJobOrigins} from '../packages/runner/dist/index.js';
 import {desiredPagesSource,pagesContent,pagesInputDigest,pagesWorkflow} from './select-pages-source.mjs';
 
 const check=(v,code)=>{if(!v)throw Error('PAGES_'+code);};
@@ -54,8 +54,11 @@ async function deploymentJob(reader,source,deployment,status,{runId,attempt,comp
   check(run.repository?.id===source.repositoryId&&run.head_repository?.id===source.repositoryId&&run.workflow_id===workflow.id
     &&run.path===pagesWorkflow&&run.head_sha===deployment.sha,'DEPLOYMENT_SOURCE');
   const jobs=await reader.pages(`actions/runs/${run.id}/jobs?filter=all`,'jobs');
-  const matching=jobs.filter(j=>/^deploy\/[a-f0-9]{64}$/.test(j.name)&&j.run_id===run.id&&j.head_sha===deployment.sha
-    &&positive(j.run_attempt)&&(attempt===undefined||j.run_attempt===attempt)&&(!match[2]||j.id===Number(match[2])));
+  check(jobs.every(j=>j.run_id===run.id&&j.head_sha===deployment.sha&&positive(j.run_attempt)&&j.run_attempt<=run.run_attempt),'DEPLOYMENT_JOB_SOURCE');
+  const origins=nativeJobOrigins(Array.from({length:run.run_attempt},(_,i)=>({attempt:i+1,jobs:jobs.filter(j=>j.run_attempt===i+1).map(jobFact)})));
+  const candidates=origins.filter(({job,origin})=>/^deploy\/[a-f0-9]{64}$/.test(origin.name)
+    &&(attempt===undefined||origin.runAttempt===attempt)&&(!match[2]||job.id===Number(match[2])));
+  const matching=[...new Set(candidates.map(({origin})=>origin.id))].map(id=>jobs.find(j=>j.id===id));
   if(matching.length!==1)return null;
   const job=matching[0];
   const step=job.steps?.find(s=>s.name==='Deploy Pages'&&s.conclusion==='success');
@@ -97,16 +100,18 @@ export async function checkPagesArtifact(reader,source,{runId,attempt,artifactId
   check([runId,attempt,artifactId].every(positive),'ARTIFACT_ID');
   const workflow=await reader.json('actions/workflows/pages.yml');check(workflow.path===pagesWorkflow&&workflow.state==='active','WORKFLOW');
   const run=await reader.json(`actions/runs/${runId}`);assertPagesRun(run,source,workflow.id);check(run.run_attempt===attempt,'ATTEMPT');
+  const origins=nativeJobOrigins(await reader.jobAttempts(runId,attempt));
+  const build=origins.filter(({job})=>job.runAttempt===attempt&&job.name===`build/${source.inputDigest}`).map(({origin})=>origin);
+  check(build.length===1&&build[0].runId===runId&&build[0].headSha===source.sourceSha
+    &&build[0].status==='completed'&&build[0].conclusion==='success'
+    &&build[0].steps.some(s=>s.name==='Upload Pages artifact'&&s.conclusion==='success'),'BUILD_PROOF');
+  const producerAttempt=build[0].runAttempt;
   const artifacts=await reader.pages(`actions/runs/${runId}/artifacts`,'artifacts');
-  const name=pagesArtifactName(source,runId,attempt),found=artifacts.filter(a=>a.name===name);
+  const name=pagesArtifactName(source,runId,producerAttempt),found=artifacts.filter(a=>a.name===name);
   check(found.length===1,'ARTIFACT_SET');const a=found[0];
   check(a.id===artifactId&&a.expired===false&&Date.parse(a.expires_at)>now&&a.size_in_bytes>0&&/^sha256:[a-f0-9]{64}$/.test(a.digest)
     &&a.workflow_run?.id===runId&&a.workflow_run?.head_sha===source.sourceSha,'ARTIFACT_SOURCE');
-  const jobs=await reader.pages(`actions/runs/${runId}/attempts/${attempt}/jobs`,'jobs');
-  const build=jobs.filter(j=>j.name===`build/${source.inputDigest}`);
-  check(build.length===1&&build[0].run_id===runId&&build[0].run_attempt===attempt&&build[0].head_sha===source.sourceSha
-    &&build[0].conclusion==='success'&&build[0].steps?.some(s=>s.name==='Upload Pages artifact'&&s.conclusion==='success'),'BUILD_PROOF');
-  return {artifactId,artifactName:name,artifactDigest:a.digest,buildJobId:build[0].id,runId,runAttempt:attempt};
+  return {artifactId,artifactName:name,artifactDigest:a.digest,buildJobId:build[0].id,runId,runAttempt:producerAttempt};
 }
 
 export async function preflightPages({reader,source,options,invocation},ports={}) {
@@ -140,7 +145,7 @@ async function main() {
     check(deployment,'DEPLOYMENT_READBACK');result={...prior,status:'DEPLOYED',deployment};
   }
   await writeFile('pages-evidence.json',JSON.stringify(result,null,2)+'\n');
-  if(process.env.GITHUB_OUTPUT)await appendFile(process.env.GITHUB_OUTPUT,`deploy=${result.status==='READY'}\n`);
+  if(process.env.GITHUB_OUTPUT)await appendFile(process.env.GITHUB_OUTPUT,`deploy=${result.status==='READY'}\n${result.status==='READY'?`artifact_name=${result.artifact.artifactName}\n`:''}`);
   console.log(JSON.stringify({status:result.status}));
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)main().catch(error=>{

@@ -9,6 +9,7 @@ import { buildLimits, decodeBuildJson } from '../../core/src/build-manifest.js';
 import { decodeNativeArchive, decodeNativeReadObservation, decodeNativeRetryLimit, decodeNativeSourceRejection, decodeNativeChannel, parseNativeResult, type NativeChannelEvidence, type NativeSourceRejection, type NativeRetryLimit, type NativeArchive, type NativeRun, type NativeJob, type NativeResult, type NativeReadObservation } from '../../core/src/native-evidence.js';
 import { deriveFailureBudget, nativeWaveKey, parseReleaseRecord, type CycleRecord, type NativeAttemptEvidence, type NativeAttemptSet, type ArchivedAttempt } from '../../core/src/release-observation.js';
 import { extractArtifactFile } from './artifact-file.js';
+import { nativeJobOrigins, type NativeJobAttempt } from '../../core/src/native-job-origins.js';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -55,7 +56,10 @@ export class EvidenceReadError extends Error {
 /** One explicit token, exact GitHub origin, bounded reads; redirected blob reads carry no credential. */
 export function nativeEvidenceTransport(token: string | undefined, transport: typeof fetch = fetch): EvidenceTransport {
   const open=async(method:'GET'|'POST',path:string,body?:object)=>{
-    check(path.startsWith('/repos/') && !path.includes('..') && !path.includes('#'), 'API path');
+    const pathname=path.split('?')[0]!;
+    let decoded:string;try{decoded=decodeURIComponent(pathname);}catch{throw new Error('NATIVE_EVIDENCE: API path');}
+    check(path.startsWith('/repos/') && !decoded.includes('..') && !decoded.includes('\\')
+      && !/[\x00-\x1f\x7f]/.test(decoded) && !path.includes('#'), 'API path');
     const headers = new Headers(githubHeaders(token ?? ''));
     if (!token) headers.delete('authorization');
     if (/\/releases\/assets\/[1-9][0-9]*$/.test(path)) headers.set('accept','application/octet-stream');
@@ -96,13 +100,23 @@ export function nativeEvidenceTransport(token: string | undefined, transport: ty
 
 export class NativeEvidenceReader {
   constructor(readonly io: EvidenceTransport, readonly repository: string) {}
-  path(path: string) { return `/repos/${this.repository}/${path}`; }
+  path(path: string) { return `/repos/${this.repository}${path ? '/'+path : ''}`; }
   async response(path: string, limit?: number) {
     const result = await this.io.request('GET', this.path(path), limit);
     if (result.status !== 200) throw new EvidenceReadError(result.status, result.headers.get('retry-after'));
     return result;
   }
   async json(path: string) { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode((await this.response(path)).bytes)); }
+  async jobAttempts(runId: number, latestAttempt: number): Promise<NativeJobAttempt[]> {
+    check(positive(runId) && positive(latestAttempt), 'job history identity');
+    const attempts: NativeJobAttempt[] = [];
+    for (let attempt = 1; attempt <= latestAttempt; attempt++) {
+      const jobs = (await this.pages(`actions/runs/${runId}/attempts/${attempt}/jobs`, 'jobs')).map(jobFact);
+      check(jobs.every(job => job.runId === runId && job.runAttempt === attempt), 'job history source');
+      attempts.push({ attempt, jobs });
+    }
+    return attempts;
+  }
   async downloadDigest(path:string) {
     if(this.io.downloadDigest) {
       const result=await this.io.downloadDigest(this.path(path),buildLimits.maxTotalBytes+16*1024*1024);
@@ -318,11 +332,27 @@ export function nativeReadFile(observation:NativeReadObservation):ArchiveFile {
   const content=JSON.stringify(observation)+'\n',sha256=hash(content);decodeNativeReadObservation(Buffer.from(content));
   return {path:`evidence/reads/${sha256}.json`,content,sha256};
 }
-export async function archiveAttempt(archive: NativeArchive): Promise<NativeAttemptEvidence> {
+function archiveExecutions(archive: NativeArchive, previous: NativeArchive[]) {
+  const attempts: NativeJobAttempt[] = [];
+  for (let attempt = 1; attempt < archive.run.runAttempt; attempt++) {
+    const prior = previous.filter(value => value.run.id === archive.run.id && value.run.runAttempt === attempt)
+      .sort((a,b) => b.observedAt.localeCompare(a.observedAt))[0];
+    check(prior && prior.repositoryId === archive.repositoryId && prior.cycleId === archive.cycleId
+      && prior.requestKey === archive.requestKey && prior.inputDigest === archive.inputDigest
+      && prior.executorControllerSha === archive.executorControllerSha && prior.workflowBlobSha === archive.workflowBlobSha
+      && prior.run.workflowId === archive.run.workflowId && prior.run.status === 'completed', 'job origin prior archive');
+    attempts.push({ attempt, jobs: prior.jobs });
+  }
+  attempts.push({ attempt: archive.run.runAttempt, jobs: archive.jobs });
+  return nativeJobOrigins(attempts).filter(({job,origin}) => job === origin && job.runAttempt === archive.run.runAttempt).map(({job}) => job);
+}
+export async function archiveAttempt(archive: NativeArchive, previous: NativeArchive[] = []): Promise<NativeAttemptEvidence> {
+  const executed = archiveExecutions(archive, previous);
   const file = archiveFile(archive), invocations = new Map<string, NativeAttemptEvidence['invocations'][number]>();
   const results = [...archive.producers.map(item=>({jobId:item.jobId,result:item.result})), ...archive.logs.flatMap(log=>log.markers.map(marker=>({jobId:log.jobId,result:marker.result})))];
   results.sort((a,b)=>a.result.execution.observedAt.localeCompare(b.result.execution.observedAt));
   for (const { jobId, result } of results) {
+    check(executed.some(job => job.id === jobId), 'retained job result attributed to later attempt');
     validateResult(result, archive, jobId);
     const evidence = structuredClone(result.execution), step = archive.jobs.find(job=>job.id===jobId)!.steps.find(step=>step.number===result.stepNumber)!;
     const objects = result.objects.map(object=>archive.objects.find(proof=>proof.kind===object.kind && proof.id===object.id && proof.expectedDigest===object.digest));
@@ -347,7 +377,7 @@ export async function archiveAttempt(archive: NativeArchive): Promise<NativeAtte
   return { repositoryId:archive.repositoryId,cycleId:archive.cycleId,workflowId:archive.run.workflowId,runId:archive.run.id,runAttempt:archive.run.runAttempt,
     entry:archive.run.path.endsWith('steward-release-publish.yml')?'build':'channel',sourceSha:archive.sourceSha,inputDigest:archive.inputDigest,
     executorControllerSha:archive.executorControllerSha,actorId:archive.run.actorId,status:archive.run.status,observedAt:archive.observedAt,
-    jobsComplete:!archive.missingNativeKeys.length,jobs:archive.jobs.map(job=>({id:job.id,steps:job.steps})),invocations:[...invocations.values()],
+    jobsComplete:!archive.missingNativeKeys.length,jobs:executed.map(job=>({id:job.id,steps:job.steps})),invocations:[...invocations.values()],
     sourceUrl:`https://api.github.com/repos/${archive.repository}/actions/runs/${archive.run.id}/attempts/${archive.run.runAttempt}`,evidenceDigest:file.sha256 };
 }
 
@@ -379,7 +409,7 @@ export async function inspectNativeCycle(input: EvidenceContext, history: Archiv
         check(jobs.every(job=>job.runId===runId && job.runAttempt===attempt && job.headSha===run.headSha),'job source');
         const archive:NativeArchive={schemaVersion:1,repositoryId:context.repositoryId,repository:context.repository,cycleId:context.cycle.id,sourceSha:context.cycle.sourceSha,
           requestKey:request.requestKey,inputDigest:request.inputDigest,...source,observedAt:utc(observedAt),run,jobs,producers:[],logs:[],objects:[],missingNativeKeys:[]};
-        for(const job of jobs) {
+        for(const job of archiveExecutions(archive, archives)) {
           const started=job.steps.filter(step=>step.name.startsWith('business-') && step.startedAt);
           if(!started.length)continue;
           for(const step of started) {
@@ -453,7 +483,7 @@ export async function inspectNativeCycle(input: EvidenceContext, history: Archiv
         // Unchanged native facts reuse their original observation; scans do not
         // append another copy of every terminal attempt merely because time passed.
         const recorded=existing?.value ?? archive;
-        archives.push(recorded); native.attempts.push(await archiveAttempt(recorded));
+        native.attempts.push(await archiveAttempt(recorded, archives)); archives.push(recorded);
       }
       check(same(latest,nativeRunFact(await reader.json(`actions/runs/${runId}`))) && same(artifacts,await reader.pages(`actions/runs/${runId}/artifacts`,'artifacts')),'run changed');
       native.runs.push({runId,workflowId:request.workflowId,entry:request.purpose==='build'?'build':'channel',sourceSha:context.cycle.sourceSha,
@@ -469,10 +499,11 @@ export async function inspectNativeCycle(input: EvidenceContext, history: Archiv
         } catch { /* Permission loss or incomplete pagination is not expiration. */ }
       }
       if(expired && prior.length) {
+        for(const file of prior) check(/^[a-f0-9]{40}$/.test(file.commit) && archiveFile(file.value).path===file.path,'archive provenance');
         for(const file of prior) {
           check(/^[a-f0-9]{40}$/.test(file.commit) && archiveFile(file.value).path===file.path,'archive provenance');
           sourceRun(context,request,file.value.run);check(file.value.requestKey===request.requestKey && file.value.inputDigest===request.inputDigest,'archive request');
-          const attempt=await archiveAttempt(file.value);archived.push({stateCommit:file.commit,rawDigest:hash(JSON.stringify(attempt)),attempt});
+          const attempt=await archiveAttempt(file.value,prior.map(file=>file.value));archived.push({stateCommit:file.commit,rawDigest:hash(JSON.stringify(attempt)),attempt});
         }
         native.runs.push({runId,workflowId:request.workflowId,entry:request.purpose==='build'?'build':'channel',sourceSha:context.cycle.sourceSha,inputDigest:request.inputDigest,
           actorId:context.appBotId,latestAttempt:Math.max(...prior.map(file=>file.value.run.runAttempt)),availability:'expired'});

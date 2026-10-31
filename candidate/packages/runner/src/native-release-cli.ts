@@ -266,7 +266,7 @@ export async function nativeReleaseCli(argv: readonly string[]) {
 /** Read-only fixed entry. Persisted records locate facts; they never grant completion. */
 export async function inspectNativeReleaseRecords(repository: string, gh: GhCommand = nativeGhCommand) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$(?![\s\S])/.test(repository) || repository.split('/').some(part=>part==='.'||part==='..')) throw new Error('RELEASE_INSPECT: repository');
-  const read = async (path: string) => JSON.parse(await gh(['api','--method','GET',`repos/${repository}/${path}`]));
+  const read = async (path: string) => JSON.parse(await gh(['api','--method','GET',`repos/${repository}${path?'/'+path:''}`]));
   const records: {path:string;blobSha:string;value:unknown}[]=[];
   try {
     const repo=await read('');

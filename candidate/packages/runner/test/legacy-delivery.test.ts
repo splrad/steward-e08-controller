@@ -43,7 +43,7 @@ async function fixture() {
     if(path.includes('delivery.json?'))return {status:404,headers:new Headers(),bytes:Buffer.from('{}')};
     if(path.includes('steward-release.json?')||path.includes('config/repositories.json?')){const source=path.includes('config/')?catalog:descriptor;
       expect(path).toContain(`ref=${path.includes('config/')?C:cycle.sourceSha}`);return f.response({type:'file',encoding:'base64',content:Buffer.from(source.content).toString('base64'),size:Buffer.byteLength(source.content),sha:source.blobSha});}
-    if(path.endsWith('/product/'))return f.response({id:1,full_name:'splrad/product',default_branch:'main',archived:false,disabled:false});
+    if(path.endsWith('/product'))return f.response({id:1,full_name:'splrad/product',default_branch:'main',archived:false,disabled:false});
     if(path.endsWith('/release-state'))return f.response({object:{sha:f.input.state.head}});
     if(path.endsWith('/releases/20'))return f.response({id:20,tag_name:unit.tag,author:{id:42},draft:false,immutable:true});
     if(path.includes('/releases/20/assets?'))return f.response(assets.map((a,i)=>({id:700+i,name:a.path,size:a.size,state:'uploaded'})));

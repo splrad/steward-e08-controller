@@ -14,7 +14,7 @@ function fixture() {
   const gh:GhCommand=async args=>{
     requests.push([...args]);expect(args.slice(0,3)).toEqual(['api','--method','GET']);
     const path=args[3]!,bytes=Buffer.from(JSON.stringify(state)),blobSha=createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
-    if(path==='repos/example/product/')return JSON.stringify({id:1,full_name:'example/product',default_branch:'main'});
+    if(path==='repos/example/product')return JSON.stringify({id:1,full_name:'example/product',default_branch:'main'});
     if(path==='repos/example/product/commits/main')return JSON.stringify({sha:S});
     if(path==='repos/example/product/git/ref/heads/steward/release-state')return JSON.stringify({ref:'refs/heads/steward/release-state',object:{type:'commit',sha:moved&&requests.length>6?T:A}});
     if(path===`repos/example/product/git/commits/${A}`)return JSON.stringify({sha:A,tree:{sha:T}});

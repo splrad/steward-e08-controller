@@ -138,7 +138,7 @@ it('the actual publication bridge adopts private BUSINESS_STARTED bytes before i
     steps:[{number:3,name:'business-release-coordinator',started_at:NOW,completed_at:null,conclusion:null}]};
   const centralIo={request:async(method:string,path:string)=>{
     expect(method).toBe('GET');
-    if(path==='/repos/splrad/steward/')return f.native.response({id:1296724484,full_name:'splrad/steward',default_branch:'main',archived:false,disabled:false});
+    if(path==='/repos/splrad/steward')return f.native.response({id:1296724484,full_name:'splrad/steward',default_branch:'main',archived:false,disabled:false});
     if(path.endsWith('/actions/workflows/20'))return f.native.response({id:20,path:run.path});
     if(path.endsWith('/jobs?per_page=100'))return f.native.response({total_count:1,jobs:[job]});
     if(path.includes('/actions/runs/900'))return f.native.response(run);throw Error('unexpected central source');

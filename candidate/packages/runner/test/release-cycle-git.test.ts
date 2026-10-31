@@ -66,7 +66,7 @@ it('publishes seven bytesets, waits for both channels, recovers protected consum
   const response=native.response;
   const io={request:async(method:string,path:string)=>{
     expect(method).toBe('GET');
-    if(path.endsWith('/product/'))return response({id:1,full_name:'fixture/product',default_branch:'main',archived:false,disabled:false});
+    if(path.endsWith('/product'))return response({id:1,full_name:'fixture/product',default_branch:'main',archived:false,disabled:false});
     if(path.includes('/rules/branches/'))return response(['creation','update','deletion'].map(type=>({type,ruleset_id:9})));
     if(path.endsWith('/rulesets/9'))return response({id:9,enforcement:'active',target:'branch',bypass_actors:[{actor_type:'Integration',actor_id:4243096,bypass_mode:'always'}]});
     if(path.endsWith('/git/ref/heads/steward/release-state'))return response({object:{sha:await git('-C',remote,'rev-parse','refs/heads/steward/release-state')}});

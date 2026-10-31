@@ -49,6 +49,17 @@ it('first governance ref requires actual organization scope and both writer/inte
     mutate=variant;await expect(verifyGovernanceCreation(io,repo,88)).rejects.toThrow();
   }
 });
+it('reads organization scope from the organization endpoint when repository projection omits it',async()=>{
+  const {verifyGovernanceCreation}=await module(),calls:string[]=[];
+  const io={async request(_method:string,path:string){calls.push(path);
+    if(path.includes('/rulesets?'))return {status:200,value:[{id:1},{id:2}]};
+    const rule=nativeRule(Number(path.split('/').at(-1)));
+    if(path.startsWith('/repos/'))delete (rule.conditions as any).repository_name;
+    return {status:200,value:rule};
+  }};
+  await verifyGovernanceCreation(io,{id:12,name:'fixture',full_name:'splrad/fixture'},88);
+  expect(calls).toContain('/orgs/splrad/rulesets/1');expect(calls).toContain('/orgs/splrad/rulesets/2');
+});
 it('native variable absence is 404 only; 403 and transport failures remain distinct failures',async()=>{
   const {bootstrapNativeIO}=await module();
   for(const status of [404,403]) {
@@ -58,6 +69,16 @@ it('native variable absence is 404 only; 403 and transport failures remain disti
     });
     expect((await io.request('GET','/repos/splrad/fixture/actions/variables/STEWARD_BOOTSTRAP_RECOVERY')).status).toBe(status);
   }
+});
+it('preserves the required all-refs slash after the installed Octokit template parser',async()=>{
+  const {bootstrapNativeIO}=await module(),calls:string[]=[];
+  const io=bootstrapNativeIO('fixture-token',async(url:any,init:any)=>{
+    calls.push(String(url));expect(init.headers['x-github-api-version']).toBe('2026-03-10');
+    const correct=String(url)==='https://api.github.com/repos/splrad/fixture/git/matching-refs/';
+    return new Response(JSON.stringify({message:correct?'Git Repository is empty.':'Not Found'}),{status:correct?409:404,headers:{'content-type':'application/json'}});
+  });
+  expect(await io.request('GET','/repos/splrad/fixture/git/matching-refs/')).toMatchObject({status:409,value:{message:'Git Repository is empty.'}});
+  expect(calls).toHaveLength(1);
 });
 it('actual Git bootstrap archive initializes its protected state branch, reads back origin and reconciles repeats',async()=>{
   const {archiveBootstrap}=await module(),{writeReleaseRecords}=await import(pathToFileURL(resolve('scripts/release-record.mjs')).href);

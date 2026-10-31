@@ -18,7 +18,7 @@ async function fixture(channelIds=['ghcr-assets']) {
   const pr={number:33,state:'open',merged:false,head:{ref:`steward/SPLRAD.LayerScape.Deployer/${unit.version}`},base:{repo:{full_name:'microsoft/winget-pkgs'}}};
   const io={request:async(method:string,path:string,_limit?:number,body?:object)=>{
     calls.push(method+' '+path);if(method==='POST'){posts.push(body);return f.response({});}
-    if(path.endsWith('/product/'))return f.response({id:1,full_name:'example/product',archived:false,disabled:false,default_branch:'trunk'});
+    if(path.endsWith('/product'))return f.response({id:1,full_name:'example/product',archived:false,disabled:false,default_branch:'trunk'});
     if(path.includes('/commits/'))return f.response({sha:D});
     if(path.endsWith('/pulls/33'))return f.response(pr);
     if(path.endsWith('actions/workflows/steward-release-channels.yml'))return f.response({id:10,path:'.github/workflows/steward-release-channels.yml',state:'active'});

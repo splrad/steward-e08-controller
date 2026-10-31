@@ -8,7 +8,7 @@ import * as downloads from '../src/native-artifact-download.js';
 import { evidenceFixture,S,C,D,START,END,NOW } from './native-evidence-fixture.js';
 const roots:string[]=[];
 afterEach(async()=>{vi.restoreAllMocks();for(const root of roots.splice(0))await rm(root,{recursive:true,force:true});});
-it.each(['valid','expired','wrong-run','duplicate','future-payload','self-artifact','changed-digest','failed-probe'])('recovers probe by exact Run artifact inventory without trusting upload output: %s',async kind=>{
+it.each(['valid','retained','expired','wrong-run','duplicate','future-payload','self-artifact','changed-digest','failed-probe'])('recovers probe by exact Run artifact inventory without trusting upload output: %s',async kind=>{
   const f=evidenceFixture(),unit=f.context.cycle.units[0]!;
   Object.assign(unit,{releaseId:20,manifestDigest:'d'.repeat(64),notesDigest:'e'.repeat(64),assets:[{id:'app',path:'app.zip',size:1,sha256:'f'.repeat(64)}]});
   f.context.cycle.requiredChannels=[{unitId:'app',channelId:'winget'}];
@@ -21,8 +21,10 @@ it.each(['valid','expired','wrong-run','duplicate','future-payload','self-artifa
   const payload:any={schemaVersion:1,cycleId:f.context.cycle.id,sourceSha:S,executionSha:D,controllerSha:C,targetsDigest:digest,nativeRunId:100,runAttempt:1,
     items:[{unitId:'app',channelId:'winget',version:unit.version,readStatus:'PENDING',exists:true,digest:null,accepted:false,indexed:false,observedAt:kind==='future-payload'?'2026-10-26T00:03:00Z':END,evidenceKind:'github-pr:3'}]};
   if(kind==='self-artifact')payload.artifactId=700;
+  const originalRun=structuredClone(run);if(kind==='retained')run.runAttempt=2;
   const io={request:async(_method:string,path:string)=>{
-    if(path.includes('/jobs?'))return f.response({total_count:1,jobs:[job]});
+    if(path.endsWith('/attempts/1'))return f.response({...f.runs.get(1),path:originalRun.path,head_sha:D,head_branch:'trunk',display_title:request.requestKey,conclusion:'success'});
+    if(path.includes('/jobs?'))return f.response({total_count:1,jobs:[path.includes('/attempts/2/')?{...job,id:2000,run_attempt:2}:job]});
     if(path.endsWith('/artifacts/700'))return f.response({...artifact,...(kind==='changed-digest'?{digest:'sha256:'+'f'.repeat(64)}:{})});
     return f.response({total_count:kind==='duplicate'?2:1,artifacts:kind==='duplicate'?[artifact,{...artifact,id:701}]:[artifact]});
   }};
@@ -32,7 +34,7 @@ it.each(['valid','expired','wrong-run','duplicate','future-payload','self-artifa
   });
   const root=await mkdtemp(join(tmpdir(),'channel-artifact-'));roots.push(root);
   const result=readChannelArtifacts(f.context,run,targets,null,root,'controller','fixture-read-token',io,NOW);
-  if(kind==='valid'){const value=await result;expect(value.files).toHaveLength(1);expect(value.reads).toEqual(payload.items);expect(JSON.parse(value.files[0]!.content).artifact.id).toBe(700);}
+  if(kind==='valid'||kind==='retained'){const value=await result;expect(value.files).toHaveLength(1);expect(value.reads).toEqual(payload.items);expect(JSON.parse(value.files[0]!.content)).toMatchObject({artifact:{id:700},job:{id:1000},run:{runAttempt:1}});}
   else if(kind==='expired'||kind==='failed-probe'){expect((await result).files).toEqual([]);expect(download).not.toHaveBeenCalled();}
   else await expect(result).rejects.toThrow();
 });

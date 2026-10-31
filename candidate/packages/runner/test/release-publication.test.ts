@@ -14,7 +14,7 @@ function fixture() {
   const calls:string[]=[],files:ArchiveFile[]=[],history:PublicationFile[]=[];let exists=false,readFailure=false;
   const centralIo:EvidenceTransport={async request(method,path) {
     calls.push(method+' '+path);if(method!=='GET')throw Error('central credentials are read only');
-    if(path==='/repos/splrad/steward/')return f.response({id:1296724484,full_name:'splrad/steward',default_branch:'main',archived:false,disabled:false});
+    if(path==='/repos/splrad/steward')return f.response({id:1296724484,full_name:'splrad/steward',default_branch:'main',archived:false,disabled:false});
     if(path.endsWith('/actions/workflows/20'))return f.response({id:20,path:run.path});
     if(path.endsWith('/jobs?per_page=100'))return f.response({total_count:1,jobs:[job]});
     if(path.includes('/actions/runs/900'))return f.response(run);

@@ -22,6 +22,8 @@ function observation() {
   const run = { id: 42, repository: { id: 1 }, head_repository: { id: 1 }, head_sha: record.sourceSha, event: 'workflow_dispatch', run_attempt: 2 };
   const first = { total_count: 1, jobs: [{ id: 11, name: 'publish / build-windows', run_id: 42, head_sha: record.sourceSha, status: 'completed', conclusion: 'success' }] };
   const second = { total_count: 1, jobs: [{ id: 21, name: 'publish / build-windows', run_id: 42, head_sha: record.sourceSha, status: 'completed', conclusion: 'failure' }] };
+  for(const [index,batch] of [first,second].entries()) Object.assign(batch.jobs[0]!, {run_attempt:index+1,
+    started_at:`2026-10-24T01:0${index}:00Z`,completed_at:`2026-10-24T01:0${index}:30Z`,steps:[]});
   const artifacts = { total_count: 1, artifacts: [{ id: 100, name: producerArtifactName({ ...record, unitId: 'app' }, 'windows', 1), workflow_run: { id: 42 }, expired: false, digest: 'sha256:' + 'c'.repeat(64) }] };
   const calls: readonly string[][] = [];
   const gh: GhCommand = async args => {
@@ -64,6 +66,11 @@ it('selects native IDs from all attempts and retains the last successful produce
   expect(await readFile(join(root, 'out/app.exe'), 'utf8')).toBe('fixture bytes');
   await writeFile(join(producer, 'unexpected.txt'), 'extra');
   await expect(pipelineCollect(historicalPipelineSource(record), selection, raw, join(root, 'bad'))).rejects.toThrow('producer file set');
+});
+it('uses the original artifact when a successful producer is retained with a new job ID in a later attempt',async()=>{
+  const f=observation();Object.assign(f.second.jobs[0]!,structuredClone(f.first.jobs[0]!),{id:21,run_attempt:2});
+  expect((await pipelineProducers(historicalPipelineSource(record),f.gh,fixtureNativePages(f.gh))).producers)
+    .toEqual([{buildId:'windows',jobId:11,attempt:1,artifactId:100}]);
 });
 it.each(['run', 'repository', 'fork', 'sha', 'event', 'attempt', 'job-source', 'partial-jobs', 'partial-artifacts', 'artifact-run', 'cancelled'])('blocks %s evidence', async kind => {
   const f = observation(), input = structuredClone(record);
