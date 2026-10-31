@@ -34,9 +34,16 @@
       "inputDigest": "13144b1ffc511e4c2de07a1519ab07bdac1a614b1e855f1537515e67a2bfd794",
       "executionSha": "a828da9c47cc48a95348941389f7780195a8bb16",
       "sentAt": "2026-10-31T09:43:00.000Z",
-      "searchWindows": [],
-      "canonicalRunId": null,
-      "nativeResponseEvidencePath": null,
+      "searchWindows": [
+        {
+          "start": "2026-10-31T09:43:00.000Z",
+          "end": "2026-10-31T09:47:29.925Z",
+          "observedAt": "2026-10-31T09:47:29.925Z",
+          "complete": true
+        }
+      ],
+      "canonicalRunId": 41189837760,
+      "nativeResponseEvidencePath": "evidence/dispatch/470d4b58f468fef7f0d8287654a8cd1678a433a5506a09be0dc6047eaa57ad07.json",
       "continuationOfRunId": null,
       "retryLimitEvidencePath": null
     }

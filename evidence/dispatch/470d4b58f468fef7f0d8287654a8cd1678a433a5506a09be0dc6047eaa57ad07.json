@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "repositoryId": 1440689456,
+  "cycleId": "pr-102-a828da9c47cc48a95348941389f7780195a8bb16",
+  "requestKey": "5f193d026d4cd4343681ba91c9cea2e2d1cf25fdfc9b88ade264e2eea81396fb",
+  "observedAt": "2026-10-31T09:47:29.925Z",
+  "kind": "SEARCH",
+  "senderNonce": null,
+  "status": null,
+  "response": null,
+  "run": null,
+  "window": {
+    "start": "2026-10-31T09:43:00.000Z",
+    "end": "2026-10-31T09:47:29.925Z"
+  },
+  "pages": [
+    {
+      "url": "https://api.github.com/repos/splrad/steward-e08-controller/actions/workflows/402624393/runs?event=workflow_dispatch&head_sha=a828da9c47cc48a95348941389f7780195a8bb16&branch=steward%2Fbuild%2Fpr-102-a828da9c47cc48a95348941389f7780195a8bb16&created=2026-10-31T09%3A43%3A00Z..2026-10-31T09%3A47%3A29Z&per_page=100&page=1",
+      "totalCount": 1,
+      "runIds": [
+        41189837760
+      ]
+    }
+  ],
+  "matches": [
+    {
+      "id": 41189837760,
+      "repositoryId": 1440689456,
+      "headRepositoryId": 1440689456,
+      "workflowId": 402624393,
+      "path": ".github/workflows/steward-release-publish.yml",
+      "event": "workflow_dispatch",
+      "headSha": "a828da9c47cc48a95348941389f7780195a8bb16",
+      "headBranch": "steward/build/pr-102-a828da9c47cc48a95348941389f7780195a8bb16",
+      "actorId": 350673636,
+      "triggeringActorId": 350673636,
+      "runAttempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "createdAt": "2026-10-31T09:43:18.000Z",
+      "updatedAt": "2026-10-31T09:43:38.000Z",
+      "displayTitle": "E08 0d5de41c055bf845cd8f896fa07b1f8c04287bac536789f29aacb52d7b342737"
+    }
+  ],
+  "errorCode": null,
+  "nextCheckAt": null
+}
