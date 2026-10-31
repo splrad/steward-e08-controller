@@ -1,0 +1,61 @@
+name: SPLRAD Steward / Native Review
+on:
+  workflow_dispatch:
+    inputs:
+      repositoryId:
+        required: true
+        type: string
+      eventAfterSha:
+        required: true
+        type: string
+      pullRequestNumber:
+        required: true
+        type: string
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  actions: read
+concurrency:
+  group: workflow-resource:1296724484:pr-body
+  cancel-in-progress: false
+  queue: max
+jobs:
+  observe:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'splrad/steward' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      state: ${{ steps.observe.outputs.state }}
+      reason: ${{ steps.observe.outputs.reason }}
+      headSha: ${{ steps.observe.outputs.headSha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5.2.3
+        env:
+          MISE_SAFE: "1"
+          MISE_NODE_COMPILE: "false"
+        with:
+          version: 2026.10.18
+          install_args: --locked
+          working_directory: .
+          cache: false
+          env: false
+          persist_github_token: false
+      - run: npm ci --ignore-scripts
+      - name: 读取当前Copilot审查证据
+        id: observe
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY_ID: ${{ inputs.repositoryId }}
+          PULL_REQUEST_NUMBER: ${{ inputs.pullRequestNumber }}
+          HEAD_SHA: ${{ inputs.eventAfterSha }}
+        run: |
+          node packages/runner/dist/index.js observe-copilot-review \
+            --repository-id "$REPOSITORY_ID" \
+            --pull-request-number "$PULL_REQUEST_NUMBER" \
+            --event-head-sha "$HEAD_SHA"
