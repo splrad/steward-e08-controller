@@ -2,6 +2,7 @@
 import * as native from './native-api/index.mjs';
 import {writeFile,appendFile} from 'node:fs/promises';
 const inputs=JSON.parse(process.env.CHANNEL_INPUTS),stage=process.argv[2],io=native.nativeEvidenceTransport(process.env.GH_TOKEN);
+if(inputs.mode==='submit')throw Error('E08_FIXTURE_SUPPORTS_OBSERVE_AND_VERIFY_ONLY');
 const reader=new native.NativeEvidenceReader(io,process.env.GITHUB_REPOSITORY);
 const head=(await reader.json('git/ref/heads/steward/release-state')).object.sha;
 async function file(path){const b=await reader.json(`contents/${path}?ref=${head}`);return JSON.parse(Buffer.from(b.content,'base64').toString());}
@@ -17,6 +18,7 @@ if(!['SOURCE','ADMITTED','OBSERVE'].includes(selection.status)){
  console.log(JSON.stringify(selection));process.exit(['UNKNOWN','NOT_BOUND'].includes(selection.status)?75:1);
 }
 const {context,targets,run}=selection,request=cycle.dispatches.find(r=>r.requestKey===inputs.request_key);
+const matrixTarget=()=>{const selected=targets.filter(t=>t.unitId===process.env.UNIT_ID&&t.channelId===process.env.CHANNEL_ID);if(selected.length!==1)throw Error('MATRIX_TARGET_REQUIRED');return selected[0];};
 const output=async values=>{for(const [k,v] of Object.entries(values))await appendFile(process.env.GITHUB_OUTPUT,`${k}=${typeof v==='object'?JSON.stringify(v):v}\n`);};
 const envelope=items=>({schemaVersion:1,cycleId:cycle.id,sourceSha:cycle.sourceSha,executionSha:run.headSha,controllerSha:cycle.controllerSha,targetsDigest:selection.targetsDigest,nativeRunId:run.id,runAttempt:run.runAttempt,items});
 async function reads(){
@@ -39,13 +41,13 @@ if(stage==='source'){
  await output({has_work:ready.ready.length>0,matrix:{include:ready.ready}});
 }else if(stage==='business'){
  await native.verifyContinuationReleases(context,io);
- const target=targets[0];await writeFile('report.json',JSON.stringify(envelope([{...target,nativeObjectId:'release:'+target.releaseId,digest:target.manifestDigest,accepted:true,indexed:true,consumed:true,observedAt:new Date().toISOString()}]))+'\n');
+ const target=matrixTarget();await writeFile('report.json',JSON.stringify(envelope([{...target,nativeObjectId:'release:'+target.releaseId,digest:target.manifestDigest,accepted:true,indexed:true,consumed:true,observedAt:new Date().toISOString()}]))+'\n');
  console.log('E08_FROZEN_BYTES_READ '+JSON.stringify({sourceSha:cycle.sourceSha,executionSha:run.headSha,releaseId:target.releaseId}));
 }else if(stage==='result'){
- const jobs=(await reader.pages(`actions/runs/${run.id}/attempts/${run.runAttempt}/jobs`,'jobs')).map(native.jobFact),job=jobs.find(j=>j.name===`${inputs.mode}/winget/app`);
- const name=`channel-${request.requestKey}-app-winget-${run.id}-${run.runAttempt}`;
+ const target=matrixTarget(),jobs=(await reader.pages(`actions/runs/${run.id}/attempts/${run.runAttempt}/jobs`,'jobs')).map(native.jobFact),job=jobs.find(j=>j.name===`${inputs.mode}/${target.channelId}/${target.unitId}`);
+ const name=`channel-${request.requestKey}-${target.unitId}-${target.channelId}-${run.id}-${run.runAttempt}`;
  const matches=(await reader.pages(`actions/runs/${run.id}/artifacts`,'artifacts')).filter(a=>a.name===name);
  if(matches.length!==1||matches[0].workflow_run?.head_sha!==run.headSha)throw Error('NATIVE_ARTIFACT_REQUIRED');
  const object={kind:'artifact',id:matches[0].id,digest:matches[0].digest.replace('sha256:','')};
- for(const receipt of native.channelBusinessResults(context,request,run,job,targets[0],new Date().toISOString(),[object]))console.log('STEWARD_RESULT '+JSON.stringify(receipt));
+ for(const receipt of native.channelBusinessResults(context,request,run,job,target,new Date().toISOString(),[object]))console.log('STEWARD_RESULT '+JSON.stringify(receipt));
 }

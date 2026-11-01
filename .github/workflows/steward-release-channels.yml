@@ -130,6 +130,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CHANNEL_INPUTS: ${{ toJSON(inputs) }}
           E08_READY: ${{ vars.E08_CHANNEL_READY }}
+          UNIT_ID: ${{ matrix.unitId }}
+          CHANNEL_ID: ${{ matrix.channelId }}
         run: node e08-channel/channel-worker.mjs business
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -141,6 +143,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CHANNEL_INPUTS: ${{ toJSON(inputs) }}
+          UNIT_ID: ${{ matrix.unitId }}
+          CHANNEL_ID: ${{ matrix.channelId }}
         run: node e08-channel/channel-worker.mjs result
   observe:
     needs: source-check
