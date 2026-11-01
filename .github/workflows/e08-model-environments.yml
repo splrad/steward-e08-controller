@@ -31,8 +31,7 @@ jobs:
       name: steward-release
       deployment: false
     steps:
-      - &a1
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
@@ -61,7 +60,10 @@ jobs:
       name: steward-release-notes
       deployment: false
     steps:
-      - *a1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
       - name: Production subprocess with synthetic SDK
         env:
           STEWARD_COPILOT_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
@@ -84,7 +86,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - *a1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
       - name: Check native secret scope
         env:
           STEWARD_COPILOT_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
@@ -107,7 +112,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - *a1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
       - name: Check native secret scope
         env:
           STEWARD_COPILOT_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
@@ -133,7 +141,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - *a1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
       - name: Check native secret scope
         env:
           STEWARD_COPILOT_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
