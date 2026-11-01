@@ -11,7 +11,7 @@ const toolIds = { jactionlint: 'github:jdx/jactionlint', zizmor: 'aqua:zizmorcor
 
 export async function assertPolicyNodeVersion(): Promise<void> {
   const inventory = JSON.parse(run('mise', ['ls', '--json'], policyRoot, toolEnvironment()));
-  const node = inventory.node;
+  const node = inventory.node?.filter((entry: any) => entry.active === true);
   if (!Array.isArray(node) || node.length !== 1 || !node[0].installed || !node[0].active
     || resolve(node[0].source?.path ?? '') !== join(policyRoot, 'mise.toml') || node[0].version !== process.versions.node) {
     throw new Error('Node does not match trusted mise lock');
@@ -21,7 +21,8 @@ export async function assertPolicyNodeVersion(): Promise<void> {
 }
 
 function toolEnvironment(): NodeJS.ProcessEnv {
-  const clean: NodeJS.ProcessEnv = { MISE_SAFE: '1', MISE_LOCKED: '1', MISE_NODE_COMPILE: 'false' };
+  const clean: NodeJS.ProcessEnv = { MISE_SAFE: '1', MISE_LOCKED: '1', MISE_NODE_COMPILE: 'false',
+    MISE_TRUSTED_CONFIG_PATHS: policyRoot };
   for (const key of ['PATH', 'Path', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'HOME', 'LANG',
     'MISE_DATA_DIR', 'MISE_CONFIG_DIR', 'MISE_CACHE_DIR', 'MISE_STATE_DIR', 'MISE_SYSTEM_CONFIG_DIR', 'MISE_GLOBAL_CONFIG_FILE']) {
     if (process.env[key]) clean[key] = process.env[key];
@@ -101,7 +102,7 @@ async function promotionTriggerException(root: string, finding: any, files: read
 export async function resolvePolicyTool(name: 'syft' | 'gh' | 'lychee' | 'oras' | 'uv'): Promise<string> {
   const ids = { syft: 'aqua:anchore/syft', gh: 'aqua:cli/cli', lychee: 'aqua:lycheeverse/lychee', oras: 'aqua:oras-project/oras', uv: 'aqua:astral-sh/uv' };
   const env = toolEnvironment(), inventory = JSON.parse(run('mise', ['ls', '--json'], policyRoot, env));
-  const entries = inventory[ids[name]];
+  const entries = inventory[ids[name]]?.filter((entry: any) => entry.active === true);
   if (!Array.isArray(entries) || entries.length !== 1 || !entries[0].installed || !entries[0].active
     || resolve(entries[0].source?.path ?? '') !== join(policyRoot, 'mise.toml')) throw new Error(`${name}: missing trusted locked tool`);
   const executable = await realpath(run('mise', ['which', name], policyRoot, env).trim());
@@ -118,7 +119,7 @@ export async function resolveWorkflowTools() {
   const tools = {} as Record<keyof typeof toolIds, string>;
   const versions = {} as Record<keyof typeof toolIds, string>;
   for (const [name, id] of Object.entries(toolIds) as [keyof typeof toolIds, string][]) {
-    const entries = inventory[id];
+    const entries = inventory[id]?.filter((entry: any) => entry.active === true);
     if (!Array.isArray(entries) || entries.length !== 1 || !entries[0].installed || !entries[0].active
       || resolve(entries[0].source?.path ?? '') !== join(policyRoot, 'mise.toml')) {
       throw new Error(`${name}: provision the trusted mise lock before validation`);
