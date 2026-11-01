@@ -1,0 +1,27 @@
+{
+  "changes": [
+    {
+      "file": "packages/runner/src/release-pipeline.js",
+      "from": "splrad-steward",
+      "to": "splrad-e08-release",
+      "before": "5d0135b6a4b1c6a99e89b7924097a967d9b1ee049d512d2b1d9596c8bd8d5c87",
+      "after": "8d8d8bc4945a5750d7a3a59b719f1ea73ec8423a076d3db82ec662c73c5d0f8d"
+    },
+    {
+      "file": "packages/runner/src/native-release-evidence.js",
+      "from": "step.with?.repository === 'splrad/steward'",
+      "to": "step.with?.repository === 'splrad/steward-e08-controller'",
+      "before": "ca6b20aaf42e84906547f2bd8328c918d522a821afef9a7d62a78f9c52644c3b",
+      "after": "40b9dfee99bf9becc564afbbe46e1404efda8871fbf582881348e0cf217cd0eb"
+    }
+  ],
+  "entry": "export * from \"./packages/runner/src/release-run.js\";\nexport * from \"./packages/runner/src/native-release-evidence.js\";\nexport {pipelineChannelIdentity,readCycleDelivery} from \"./packages/runner/src/release-pipeline.js\";\nexport {decodeReleaseRecord} from \"./packages/core/src/release-observation.js\";",
+  "bundleSha256": "d4f84e6e01d314cd5b47c16335e7244a51a461cff3dfec42177e5fdebf215dc9",
+  "assets": [],
+  "sourceRepository": "splrad/steward",
+  "sourceFiles": {
+    "packages/runner/src/release-run.ts": "dc9adc17e690ac784053cbb8842b90d067ea2bcee1d05bc2afb494578966e9a0",
+    "packages/runner/src/release-pipeline.ts": "5a6cc72778cb9d110c46be327ab4b7bdf0c0832bf9b4849f346592269e7c987d",
+    "packages/runner/src/native-release-evidence.ts": "e84d41294e3cf5fe288dd0659027f1e8307f9fa71432a4c4b261ffa56dc529e1"
+  }
+}
