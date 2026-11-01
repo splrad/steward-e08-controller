@@ -61,6 +61,33 @@
       "nativeResponseEvidencePath": "evidence/dispatch/e63b5702f6497802cd2f8be8cf618a64d8e0ec342ab6aa704dc9390bd239a517.json",
       "continuationOfRunId": null,
       "retryLimitEvidencePath": null
+    },
+    {
+      "requestKey": "f767fd815a4a1e956ad1c39fb483de2040e5e6fa2f9185efd6b75a46d4fe0653",
+      "operationKey": "7833a397c7c64936389c5c795ba0460d664ce38362cb67e71187f6e6ad74b658",
+      "purpose": "channel-verify",
+      "workflowId": 403392871,
+      "ref": "e08-channel-trunk",
+      "sourceSha": "0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+      "targetKey": "[403392871,\"e08-channel-trunk\",\"2242a2bef64e9255bdb74f2127809017be0225ae\",\"0d6319c44683bb7a6f21dd4e4591e87c3255d18b\",[\"app\"],[\"winget\"],\"verify\"]",
+      "executionSha": "2242a2bef64e9255bdb74f2127809017be0225ae",
+      "inputs": {
+        "cycle_id": "pr-807-0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+        "source_sha": "0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+        "execution_sha": "2242a2bef64e9255bdb74f2127809017be0225ae",
+        "controller_sha": "8d91ff3210ca147895e158cf35b00ac3847b6be2",
+        "targets_json": "[{\"unitId\":\"app\",\"channelId\":\"winget\",\"version\":\"1.0.0\",\"releaseId\":430443628,\"manifestDigest\":\"796fede3d6085ef990912c56d0e33f515f90feff486093cf2821404ba62437cd\"}]",
+        "mode": "verify",
+        "operation_key": "7833a397c7c64936389c5c795ba0460d664ce38362cb67e71187f6e6ad74b658",
+        "request_key": "f767fd815a4a1e956ad1c39fb483de2040e5e6fa2f9185efd6b75a46d4fe0653"
+      },
+      "inputDigest": "0af5538af1be93f0567e185c898fe4259eca20711b2618fc3363b9775d6d5065",
+      "sentAt": "2026-11-01T09:53:45.000Z",
+      "searchWindows": [],
+      "canonicalRunId": null,
+      "nativeResponseEvidencePath": null,
+      "continuationOfRunId": 41292993172,
+      "retryLimitEvidencePath": "evidence/retry-limit/2806ee4b330032d4993ddf3719aba6013ec99a187584d0be86f35f970ecca2cb.json"
     }
   ],
   "publications": [],
