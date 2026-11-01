@@ -1,0 +1,99 @@
+name: E08 Native Renovate
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [extract, lookup, full, apply]
+        default: full
+        required: true
+permissions:
+  contents: read
+jobs:
+  update:
+    if: github.repository_id == '1440689456' && github.repository == 'splrad/steward-e08-controller' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: steward-automation
+      deployment: false
+    concurrency:
+      group: e08-native-renovate
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        env:
+          MISE_SAFE: '1'
+          MISE_NODE_COMPILE: 'false'
+        with:
+          version: 2026.10.24
+          install_args: --locked
+          cache: false
+          env: false
+          persist_github_token: false
+      - id: target-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: Iv23liu2OIRtzR11gmWk
+          private-key: ${{ secrets.STEWARD_APP_PRIVATE_KEY }}
+          owner: splrad
+          repositories: steward-e08-bootstrap
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+          permission-workflows: write
+          permission-actions: read
+          permission-checks: read
+          permission-metadata: read
+      - name: Bind single isolated target
+        env:
+          GH_TOKEN: ${{ steps.target-token.outputs.token }}
+          INSTALLATION_ID: ${{ steps.target-token.outputs.installation-id }}
+          APP_SLUG: ${{ steps.target-token.outputs.app-slug }}
+        run: |
+          test "$INSTALLATION_ID" = 177159079
+          test "$APP_SLUG" = splrad-e08-release
+          gh api /installation/repositories --jq '(.total_count == 1) and (.repositories[0].id == 1440689606)' | grep -qx true
+      - id: renovate
+        uses: renovatebot/github-action@43b963bf5dd5e57f1f95c59765a018d782870211 # v46.3.11
+        with:
+          configurationFile: config/renovate/global.cjs
+          token: ${{ steps.target-token.outputs.token }}
+          renovate-image: ghcr.io/renovatebot/renovate:44.198.2@sha256:4132c8c1b0051ade1429c2e5f439569b361b4527216a1c184ff4ba58a2d1fd7e
+          mount-docker-socket: false
+          env-regex: ^(?:RENOVATE_REPOSITORIES|RENOVATE_DRY_RUN|MISE_SAFE|LOG_LEVEL|LOG_FILE|LOG_FILE_LEVEL)$
+        env:
+          RENOVATE_REPOSITORIES: splrad/steward-e08-bootstrap
+          RENOVATE_DRY_RUN: ${{ inputs.mode != 'apply' && inputs.mode || '' }}
+          MISE_SAFE: '1'
+          LOG_LEVEL: debug
+          LOG_FILE: /tmp/e08-renovate.jsonl
+          LOG_FILE_LEVEL: debug
+      - id: scrub
+        name: Check log contains no credential
+        if: always() && steps.renovate.outcome != 'skipped'
+        env:
+          TOKEN_TO_CHECK: ${{ steps.target-token.outputs.token }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          token = os.environ['TOKEN_TO_CHECK']
+          log = Path('/tmp/e08-renovate.jsonl').read_text()
+          assert token and token not in log, 'LOG_CREDENTIAL_CHECK_FAILED'
+          PY
+      - name: Verify native updater result
+        if: always() && steps.scrub.outcome == 'success'
+        run: mise exec --locked -- node scripts/verify-renovate-log.mjs /tmp/e08-renovate.jsonl
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.1
+        if: always() && steps.scrub.outcome == 'success'
+        with:
+          name: e08-renovate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/e08-renovate.jsonl
+          if-no-files-found: error
+          retention-days: 30
