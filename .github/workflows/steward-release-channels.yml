@@ -1,0 +1,192 @@
+name: E08 Product Release Channels
+run-name: Channels ${{ inputs.mode }} ${{ inputs.request_key }}
+on:
+  workflow_dispatch:
+    inputs:
+      cycle_id: {type: string, required: true}
+      source_sha: {type: string, required: true}
+      execution_sha: {type: string, required: true}
+      controller_sha: {type: string, required: true}
+      targets_json: {type: string, required: true}
+      mode: {type: string, required: true}
+      operation_key: {type: string, required: true}
+      request_key: {type: string, required: true}
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: e08-channels-${{ inputs.mode == 'observe' && 'observe' || 'business' }}
+  queue: max
+  cancel-in-progress: false
+jobs:
+  source-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      targets_digest: ${{ steps.native.outputs.targets_digest }}
+      limit: ${{ steps.native.outputs.limit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: splrad/steward-e08-controller
+          ref: 8d91ff3210ca147895e158cf35b00ac3847b6be2
+          path: controller-origin
+          persist-credentials: false
+      - name: Native source
+        id: native
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL_INPUTS: ${{ toJSON(inputs) }}
+          E08_READY: ${{ vars.E08_CHANNEL_READY }}
+        run: node e08-channel/channel-worker.mjs source
+  admit:
+    needs: source-check
+    if: inputs.mode != 'observe'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: splrad/steward-e08-controller
+          ref: 8d91ff3210ca147895e158cf35b00ac3847b6be2
+          path: controller-origin
+          persist-credentials: false
+      - name: Native admit
+        id: native
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL_INPUTS: ${{ toJSON(inputs) }}
+          E08_READY: ${{ vars.E08_CHANNEL_READY }}
+        run: |-
+          for attempt in $(seq 1 20); do
+            if node e08-channel/channel-worker.mjs admit; then exit 0; else status=$?; fi
+            if [ "$status" -ne 75 ]; then exit "$status"; fi
+            sleep 5
+          done
+          exit 75
+  channel-prepare:
+    name: channel-prepare
+    needs: [source-check, admit]
+    if: inputs.mode != 'observe'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: channel-read
+      deployment: false
+    outputs:
+      has_work: ${{ steps.native.outputs.has_work }}
+      matrix: ${{ steps.native.outputs.matrix }}
+    steps:
+      - name: E08 infrastructure limit fixture
+        if: needs.source-check.outputs.limit == 'true'
+        run: exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: splrad/steward-e08-controller
+          ref: 8d91ff3210ca147895e158cf35b00ac3847b6be2
+          path: controller-origin
+          persist-credentials: false
+      - name: business-channel-readiness
+        id: native
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL_INPUTS: ${{ toJSON(inputs) }}
+          E08_READY: ${{ vars.E08_CHANNEL_READY }}
+        run: node e08-channel/channel-worker.mjs prepare
+  verify:
+    name: verify/${{ matrix.channelId }}/${{ matrix.unitId }}
+    needs: [source-check, channel-prepare]
+    if: inputs.mode == 'verify' && needs.channel-prepare.outputs.has_work == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      matrix: ${{ fromJSON(needs.channel-prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: splrad/steward-e08-controller
+          ref: 8d91ff3210ca147895e158cf35b00ac3847b6be2
+          path: controller-origin
+          persist-credentials: false
+      - name: business-frozen-read
+        id: native
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL_INPUTS: ${{ toJSON(inputs) }}
+          E08_READY: ${{ vars.E08_CHANNEL_READY }}
+          UNIT_ID: ${{ matrix.unitId }}
+          CHANNEL_ID: ${{ matrix.channelId }}
+        run: node e08-channel/channel-worker.mjs business
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: channel-${{ inputs.request_key }}-${{ matrix.unitId }}-${{ matrix.channelId }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: report.json
+          if-no-files-found: error
+      - name: Native result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL_INPUTS: ${{ toJSON(inputs) }}
+          UNIT_ID: ${{ matrix.unitId }}
+          CHANNEL_ID: ${{ matrix.channelId }}
+        run: node e08-channel/channel-worker.mjs result
+  observe:
+    needs: source-check
+    if: inputs.mode == 'observe'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: channel-read
+      deployment: false
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: splrad/steward-e08-controller
+          ref: 8d91ff3210ca147895e158cf35b00ac3847b6be2
+          path: controller-origin
+          persist-credentials: false
+      - name: Native observe
+        id: native
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL_INPUTS: ${{ toJSON(inputs) }}
+          E08_READY: ${{ vars.E08_CHANNEL_READY }}
+        run: node e08-channel/channel-worker.mjs observe
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: probe-${{ inputs.cycle_id }}-${{ steps.native.outputs.targets_digest }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: report.json
+          if-no-files-found: error
+  collect:
+    needs: [source-check, admit, channel-prepare, verify, observe]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: python -c 'import os,json; x=json.loads(os.environ["RESULTS"]); assert all(v["result"] in ("success","skipped") for v in x.values())'
