@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: splrad/steward-e08-controller
-          ref: 9bd23f1993d07f4fbea5152e3a234f55126064da
+          ref: 8ddf9785bec0b67fd45a25c107492c6ab8ef4df1
           path: controller-origin
           persist-credentials: false
       - name: Native source
@@ -62,7 +62,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: splrad/steward-e08-controller
-          ref: 9bd23f1993d07f4fbea5152e3a234f55126064da
+          ref: 8ddf9785bec0b67fd45a25c107492c6ab8ef4df1
           path: controller-origin
           persist-credentials: false
       - name: Native admit
@@ -101,7 +101,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: splrad/steward-e08-controller
-          ref: 9bd23f1993d07f4fbea5152e3a234f55126064da
+          ref: 8ddf9785bec0b67fd45a25c107492c6ab8ef4df1
           path: controller-origin
           persist-credentials: false
       - name: business-channel-readiness
@@ -127,7 +127,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: splrad/steward-e08-controller
-          ref: 9bd23f1993d07f4fbea5152e3a234f55126064da
+          ref: 8ddf9785bec0b67fd45a25c107492c6ab8ef4df1
           path: controller-origin
           persist-credentials: false
       - name: business-frozen-read
@@ -172,7 +172,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: splrad/steward-e08-controller
-          ref: 9bd23f1993d07f4fbea5152e3a234f55126064da
+          ref: 8ddf9785bec0b67fd45a25c107492c6ab8ef4df1
           path: controller-origin
           persist-credentials: false
       - name: Native observe
