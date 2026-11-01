@@ -9,7 +9,7 @@ export function verifyRenovateLog(text) {
   for (const line of lines) {
     const record = JSON.parse(line);
     if (!record || typeof record.msg !== 'string' || !Number.isInteger(record.level)) throw new Error('RENOVATE_BLOCKED: invalid structured log');
-    if (record.level >= 40 || /Could not parse mise version output|Failed to determine mise version|mise lock.*requires|artifact.*(?:error|fail)|lock.*(?:skip|fail)/i.test(record.msg)) throw new Error('RENOVATE_BLOCKED: native warning, error or skipped lock operation');
+    if (record.level >= 40 || /Could not parse mise version output|Failed to determine mise version|No mise lock file found|mise lock.*requires|artifact.*(?:error|fail)|lock.*(?:skip|fail)/i.test(record.msg)) throw new Error('RENOVATE_BLOCKED: native warning, error or skipped lock operation');
     for (const output of [record.stdout, record.stderr, record.err?.stdout, record.err?.stderr]) {
       if (typeof output !== 'string') continue;
       const plain = stripVTControlCharacters(output);
