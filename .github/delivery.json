@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "repositoryAuthors": [
+    {
+      "id": 44151430,
+      "evidence": "User confirmed axiomoth; identity already verified."
+    }
+  ],
+  "units": [
+    {
+      "id": "app",
+      "path": ".",
+      "notesPath": ".release-notes/app.md",
+      "assets": [
+        {
+          "id": "sample",
+          "name": "sample-${version}.bin",
+          "mediaType": "application/octet-stream"
+        }
+      ],
+      "channels": [
+        {
+          "id": "winget",
+          "required": true,
+          "location": "SPLRAD.E08.Synthetic"
+        }
+      ]
+    }
+  ]
+}
