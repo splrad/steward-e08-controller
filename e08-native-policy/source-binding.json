@@ -1,0 +1,29 @@
+{
+  "changes": [
+    {
+      "file": "packages/runner/src/release-pipeline.js",
+      "from": "splrad-steward",
+      "to": "splrad-e08-release",
+      "before": "5d0135b6a4b1c6a99e89b7924097a967d9b1ee049d512d2b1d9596c8bd8d5c87",
+      "after": "8d8d8bc4945a5750d7a3a59b719f1ea73ec8423a076d3db82ec662c73c5d0f8d"
+    },
+    {
+      "file": "packages/runner/src/native-release-evidence.js",
+      "from": "step.with?.repository === 'splrad/steward'",
+      "to": "step.with?.repository === 'splrad/steward-e08-controller'",
+      "before": "baf3946c29bdf9dbacac7bc7e60c5dc49bd625dd03a97c2cb38df85b21ed8247",
+      "after": "d4caf2ed78f5c75a1e9931425a77808176f288f732a35512d47074fd62ea255f"
+    }
+  ],
+  "entry": "export * from \"./packages/runner/src/release-run.js\";\nexport * from \"./packages/runner/src/native-release-evidence.js\";\nexport {pipelineChannelIdentity,readCycleDelivery} from \"./packages/runner/src/release-pipeline.js\";\nexport {decodeReleaseRecord} from \"./packages/core/src/release-observation.js\";",
+  "bundleSha256": "f0dafa780d9bfd0f3d8e48774199b56807b787813c88cb29b48149f621751200",
+  "assets": [],
+  "sourceRepository": "splrad/steward",
+  "sourceFiles": {
+    "packages/core/src/native-evidence.ts": "c00038d8d56f2b15607e6c6c737b7399a9218a16b19d79d1bb07317ad5b5e35b",
+    "packages/core/src/release-observation.ts": "f650ba97cdffd0eaedeefc7883a21cd83fcbabec79ad50b1d33202a3d45e57ea",
+    "packages/runner/src/release-run.ts": "dc9adc17e690ac784053cbb8842b90d067ea2bcee1d05bc2afb494578966e9a0",
+    "packages/runner/src/release-pipeline.ts": "5a6cc72778cb9d110c46be327ab4b7bdf0c0832bf9b4849f346592269e7c987d",
+    "packages/runner/src/native-release-evidence.ts": "c132560c9c1e02effddae9aadb6ea630b86c4602408f11f963813b056e8bc81b"
+  }
+}
