@@ -1,0 +1,73 @@
+{
+  "id": "pr-807-0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+  "prNumber": 807,
+  "sourceSha": "0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+  "controllerSha": "8d91ff3210ca147895e158cf35b00ac3847b6be2",
+  "deliveryConfigSha": "db3cc98c10bb3ad2301d87c099bfe22fec80e1e8",
+  "units": [
+    {
+      "id": "app",
+      "version": "1.0.0",
+      "tag": "e08-channel-v1.0.0",
+      "releaseId": 430443628,
+      "assets": [
+        {
+          "id": "sample",
+          "path": "sample-1.0.0.bin",
+          "size": 51,
+          "sha256": "f6c9597fe6be51bf3574cd12aea66bcfdc3d35e281347d8d24f392b9054c103f"
+        },
+        {
+          "id": "manifest",
+          "path": "artifact-manifest.json",
+          "size": 215,
+          "sha256": "796fede3d6085ef990912c56d0e33f515f90feff486093cf2821404ba62437cd"
+        }
+      ],
+      "notesDigest": "d15f752f781f51339fbe0ca02448fcd101f68dc9b5cb1bde75c95c535e9f4410",
+      "manifestDigest": "796fede3d6085ef990912c56d0e33f515f90feff486093cf2821404ba62437cd"
+    }
+  ],
+  "requiredChannels": [
+    {
+      "unitId": "app",
+      "channelId": "winget"
+    }
+  ],
+  "dispatches": [
+    {
+      "requestKey": "9b178df4f46dbb65ca4e0b7ece728fe634b6b4bdbfe217a981c5045ffa1ae84b",
+      "operationKey": "1ec6bba277f73d981162a01e74c37ef9d2e346ccb666c69626f1ad66a8089129",
+      "purpose": "channel-verify",
+      "workflowId": 403392871,
+      "ref": "e08-channel-trunk",
+      "sourceSha": "0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+      "targetKey": "[403392871,\"e08-channel-trunk\",\"302710276eb2b3b48fff1c4e4f34e40261395ba0\",\"0d6319c44683bb7a6f21dd4e4591e87c3255d18b\",[\"app\"],[\"winget\"],\"verify\"]",
+      "executionSha": "302710276eb2b3b48fff1c4e4f34e40261395ba0",
+      "inputs": {
+        "cycle_id": "pr-807-0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+        "source_sha": "0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+        "execution_sha": "302710276eb2b3b48fff1c4e4f34e40261395ba0",
+        "controller_sha": "8d91ff3210ca147895e158cf35b00ac3847b6be2",
+        "targets_json": "[{\"unitId\":\"app\",\"channelId\":\"winget\",\"version\":\"1.0.0\",\"releaseId\":430443628,\"manifestDigest\":\"796fede3d6085ef990912c56d0e33f515f90feff486093cf2821404ba62437cd\"}]",
+        "mode": "verify",
+        "operation_key": "1ec6bba277f73d981162a01e74c37ef9d2e346ccb666c69626f1ad66a8089129",
+        "request_key": "9b178df4f46dbb65ca4e0b7ece728fe634b6b4bdbfe217a981c5045ffa1ae84b"
+      },
+      "inputDigest": "e97a1761846158c7579068fa088a75b8824868a65570acc6193689b8ffec07f9",
+      "sentAt": "2026-11-01T09:24:07.000Z",
+      "searchWindows": [],
+      "canonicalRunId": null,
+      "nativeResponseEvidencePath": null,
+      "continuationOfRunId": null,
+      "retryLimitEvidencePath": null
+    }
+  ],
+  "publications": [],
+  "channelFacts": [],
+  "executionEvidence": [],
+  "completionObservations": [],
+  "completedEvidencePath": null,
+  "repairOf": null,
+  "approvedRepairDecision": null
+}
