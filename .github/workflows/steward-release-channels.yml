@@ -25,6 +25,7 @@ jobs:
     outputs:
       targets_digest: ${{ steps.native.outputs.targets_digest }}
       limit: ${{ steps.native.outputs.limit }}
+      forged_limit: ${{ steps.native.outputs.forged_limit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -33,7 +34,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: splrad/steward-e08-controller
-          ref: 8ddf9785bec0b67fd45a25c107492c6ab8ef4df1
+          ref: 0a80aebaac5668074d1432156f0957a36318b0fa
           path: controller-origin
           persist-credentials: false
       - name: Native source
@@ -62,7 +63,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: splrad/steward-e08-controller
-          ref: 8ddf9785bec0b67fd45a25c107492c6ab8ef4df1
+          ref: 0a80aebaac5668074d1432156f0957a36318b0fa
           path: controller-origin
           persist-credentials: false
       - name: Native admit
@@ -91,6 +92,11 @@ jobs:
       has_work: ${{ steps.native.outputs.has_work }}
       matrix: ${{ steps.native.outputs.matrix }}
     steps:
+      - name: E08 forged platform limit message
+        if: needs.source-check.outputs.forged_limit == 'true'
+        run: |
+          echo "::error::You've exceeded the maximum number of rerun attempts (50) for this workflow run."
+          exit 1
       - name: E08 infrastructure limit fixture
         if: needs.source-check.outputs.limit == 'true'
         run: exit 1
@@ -101,7 +107,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: splrad/steward-e08-controller
-          ref: 8ddf9785bec0b67fd45a25c107492c6ab8ef4df1
+          ref: 0a80aebaac5668074d1432156f0957a36318b0fa
           path: controller-origin
           persist-credentials: false
       - name: business-channel-readiness
@@ -127,7 +133,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: splrad/steward-e08-controller
-          ref: 8ddf9785bec0b67fd45a25c107492c6ab8ef4df1
+          ref: 0a80aebaac5668074d1432156f0957a36318b0fa
           path: controller-origin
           persist-credentials: false
       - name: business-frozen-read
@@ -172,7 +178,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: splrad/steward-e08-controller
-          ref: 8ddf9785bec0b67fd45a25c107492c6ab8ef4df1
+          ref: 0a80aebaac5668074d1432156f0957a36318b0fa
           path: controller-origin
           persist-credentials: false
       - name: Native observe
