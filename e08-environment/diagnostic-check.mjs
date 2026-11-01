@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 const value=process.env.STEWARD_COPILOT_TOKEN;
 if(!value||!process.env.STEWARD_APP_PRIVATE_KEY||!process.env.E08_RELEASE_ONLY)throw Error('FIXTURE_SECRET_REQUIRED');
 const worker=fileURLToPath(new URL('./environment-worker.mjs',import.meta.url));
-const secretValues=[value,process.env.STEWARD_APP_PRIVATE_KEY,process.env.E08_RELEASE_ONLY];
+const secretValues=[value,process.env.STEWARD_APP_PRIVATE_KEY,process.env.E08_RELEASE_ONLY,process.env.E08_NOTES_ONLY].filter(value=>typeof value==='string'&&value.length>0);
 const results=[];
 for(const [mode,environment] of [['build',{...process.env}],['observe',{...process.env}],['release',{...process.env,E08_NOTES_ONLY:value,E08_EXPECTED_REVISION:'1',E08_ACCEPTED_REVISIONS:'[1,2]'}]]){
  const result=spawnSync(process.execPath,[worker,mode],{env:environment,encoding:'utf8'});
