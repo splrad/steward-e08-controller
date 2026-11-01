@@ -1,0 +1,9 @@
+name: E08 Native Template Source
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "E08 template source identity"
