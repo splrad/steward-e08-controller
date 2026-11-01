@@ -26,7 +26,7 @@ async function reads(){
  return targets.map(t=>({unitId:t.unitId,channelId:t.channelId,version:t.version,readStatus:ready?'OK':'PENDING',exists:true,digest:'sha256:'+t.manifestDigest,accepted:true,indexed:ready,observedAt:new Date().toISOString(),evidenceKind:'E08_SYNTHETIC_INDEX_DELAY_NATIVE_RELEASE_BYTES'}));
 }
 if(stage==='source'){
- await output({targets_digest:selection.targetsDigest,limit:cycle.prNumber===803,has_work:true});
+ await output({targets_digest:selection.targetsDigest,limit:cycle.prNumber===803&&request?.continuationOfRunId===null,has_work:true});
  console.log(JSON.stringify({sourceSha:cycle.sourceSha,executionSha:run.headSha,controllerSha:cycle.controllerSha,defaultBranch:state.repository.defaultBranch}));
 }else if(stage==='observe'){
  if(selection.status!=='OBSERVE')throw Error('OBSERVE_REQUIRED');

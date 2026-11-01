@@ -65,7 +65,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CHANNEL_INPUTS: ${{ toJSON(inputs) }}
           E08_READY: ${{ vars.E08_CHANNEL_READY }}
-        run: node e08-channel/channel-worker.mjs admit
+        run: |-
+          for attempt in $(seq 1 20); do
+            if node e08-channel/channel-worker.mjs admit; then exit 0; else status=$?; fi
+            if [ "$status" -ne 75 ]; then exit "$status"; fi
+            sleep 5
+          done
+          exit 75
   channel-prepare:
     name: channel-prepare
     needs: [source-check, admit]
