@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {readFile,writeFile} from 'node:fs/promises';
+const blocked=['STEWARD_APP_PRIVATE_KEY','GOVERNANCE_APP_PRIVATE_KEY','GH_TOKEN','GITHUB_TOKEN','POLICY_READ_TOKEN','E08_RELEASE_ONLY','E08_NOTES_ONLY','E08_ACCEPTED_REVISIONS','E08_EXPECTED_REVISION','NODE_OPTIONS','HTTPS_PROXY','COPILOT_HOME'];
+for(const key of blocked)assert.equal(process.env[key],undefined,'CHILD_ENVIRONMENT_LEAK');
+assert.equal(process.env.HOME,process.cwd());
+const token=JSON.parse(process.env.STEWARD_COPILOT_TOKEN);
+assert.equal(token.scope,'E08_SYNTHETIC_ONLY');
+assert.ok([1,2].includes(token.revision)&&typeof token.nonce==='string'&&token.nonce.length>=32);
+const policy=JSON.parse(await readFile(new URL('../../provider.json',import.meta.url),'utf8'));
+const status=policy.accepted.includes(token.revision)?'READY':'WAIT_AUTH';
+await writeFile(new URL('../../observed.json',import.meta.url),JSON.stringify({status,revision:token.revision,isolation:true}));
+process.stdout.write(JSON.stringify({status}));
