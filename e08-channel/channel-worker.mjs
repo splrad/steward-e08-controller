@@ -43,5 +43,9 @@ if(stage==='source'){
  console.log('E08_FROZEN_BYTES_READ '+JSON.stringify({sourceSha:cycle.sourceSha,executionSha:run.headSha,releaseId:target.releaseId}));
 }else if(stage==='result'){
  const jobs=(await reader.pages(`actions/runs/${run.id}/attempts/${run.runAttempt}/jobs`,'jobs')).map(native.jobFact),job=jobs.find(j=>j.name===`${inputs.mode}/winget/app`);
- for(const receipt of native.channelBusinessResults(context,request,run,job,targets[0],new Date().toISOString()))console.log('STEWARD_RESULT '+JSON.stringify(receipt));
+ const name=`channel-${request.requestKey}-app-winget-${run.id}-${run.runAttempt}`;
+ const matches=(await reader.pages(`actions/runs/${run.id}/artifacts`,'artifacts')).filter(a=>a.name===name);
+ if(matches.length!==1||matches[0].workflow_run?.head_sha!==run.headSha)throw Error('NATIVE_ARTIFACT_REQUIRED');
+ const object={kind:'artifact',id:matches[0].id,digest:matches[0].digest.replace('sha256:','')};
+ for(const receipt of native.channelBusinessResults(context,request,run,job,targets[0],new Date().toISOString(),[object]))console.log('STEWARD_RESULT '+JSON.stringify(receipt));
 }
