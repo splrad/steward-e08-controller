@@ -8,7 +8,7 @@ export function parseNameStatus(bytes) {
   const text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
   check(!text||text.endsWith('\0'),'DIFF_TERMINATOR');const fields=text?text.slice(0,-1).split('\0'):[],changes=[];
   while(fields.length){const status=fields.shift(),count=/^[RC]\d{1,3}$/.test(status)?2:1;
-    check(/^[AMDT]$/.test(status)||/^[RC](?:100|[0-9]{1,2})$/.test(status),'DIFF_STATUS');
+    check(/^[AMDT]$/.test(status)||/^[RC](?:100|0?[0-9]{1,2})$/.test(status),'DIFF_STATUS');
     check(fields.length>=count,'DIFF_PATH');changes.push({status,paths:fields.splice(0,count)});}
   return changes;
 }
