@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "repositoryId": 1440689456,
+  "cycleId": "pr-809-0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+  "requestKey": "cad63802b2a45e4eee7b7a1628204c91b5a783ebb2b296bcd15f52eace628918",
+  "observedAt": "2026-11-01T10:40:53.749Z",
+  "kind": "RESPONSE",
+  "senderNonce": null,
+  "status": 200,
+  "response": {
+    "workflow_run_id": 41298699750,
+    "run_url": "https://api.github.com/repos/splrad/steward-e08-controller/actions/runs/41298699750",
+    "html_url": "https://github.com/splrad/steward-e08-controller/actions/runs/41298699750"
+  },
+  "run": {
+    "id": 41298699750,
+    "repositoryId": 1440689456,
+    "headRepositoryId": 1440689456,
+    "workflowId": 403392871,
+    "path": ".github/workflows/steward-release-channels.yml",
+    "event": "workflow_dispatch",
+    "headSha": "904007a2f3a87ffcd15481f2d7768b86b409fe4e",
+    "headBranch": "e08-channel-trunk",
+    "actorId": 350673636,
+    "triggeringActorId": 350673636,
+    "runAttempt": 1,
+    "status": "in_progress",
+    "conclusion": null,
+    "createdAt": "2026-11-01T10:43:04.000Z",
+    "updatedAt": "2026-11-01T10:43:08.000Z",
+    "displayTitle": "Channels verify cad63802b2a45e4eee7b7a1628204c91b5a783ebb2b296bcd15f52eace628918"
+  },
+  "window": null,
+  "pages": [],
+  "matches": [],
+  "errorCode": null,
+  "nextCheckAt": null
+}

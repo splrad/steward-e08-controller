@@ -84,8 +84,8 @@
       "inputDigest": "afe71c9d6a483ebc18b968156ae9a3dc7e33db9dbffd119c04f36daf8c5f2ac8",
       "sentAt": "2026-11-01T10:40:50.000Z",
       "searchWindows": [],
-      "canonicalRunId": null,
-      "nativeResponseEvidencePath": null,
+      "canonicalRunId": 41298699750,
+      "nativeResponseEvidencePath": "evidence/dispatch/3f16ffd6f3e837fc49f8cf487f8037d6fe8523fd585a7d4e099b04c7b52e8b18.json",
       "continuationOfRunId": 41296782432,
       "retryLimitEvidencePath": "evidence/retry-limit/cd7ab50e992f2becafa214431234e63c09fc4973315a7370dd311be3fabe2a67.json"
     }
