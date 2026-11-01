@@ -18,13 +18,7 @@
           "mediaType": "application/octet-stream"
         }
       ],
-      "channels": [
-        {
-          "id": "winget",
-          "required": true,
-          "location": "SPLRAD.E08.Synthetic"
-        }
-      ]
+      "channels": []
     }
   ]
 }
