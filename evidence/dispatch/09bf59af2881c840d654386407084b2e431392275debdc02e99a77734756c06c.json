@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "repositoryId": 1440689456,
+  "cycleId": "pr-805-0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+  "requestKey": "02e5234740750082856ebd23a28de7d11b97c07d185ccca7cac7ae8e09f1f3c4",
+  "observedAt": "2026-11-01T09:03:17.491Z",
+  "kind": "READ_FAILURE",
+  "senderNonce": null,
+  "status": null,
+  "response": null,
+  "run": null,
+  "window": null,
+  "pages": [],
+  "matches": [],
+  "errorCode": "NATIVE_DISPATCH_EVIDENCE_UNAVAILABLE",
+  "nextCheckAt": "2026-11-01T09:08:17.491Z"
+}
