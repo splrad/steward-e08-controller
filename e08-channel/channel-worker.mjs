@@ -1,5 +1,5 @@
 // E08 synthetic channel adapter. Native source, identity, reports and recovery contracts use the production implementation.
-import * as native from './native-api/index.mjs';
+import * as native from '../controller-origin/e08-native-policy/native-api/index.mjs';
 import {writeFile,appendFile} from 'node:fs/promises';
 const inputs=JSON.parse(process.env.CHANNEL_INPUTS),stage=process.argv[2],io=native.nativeEvidenceTransport(process.env.GH_TOKEN);
 if(inputs.mode==='submit')throw Error('E08_FIXTURE_SUPPORTS_OBSERVE_AND_VERIFY_ONLY');
