@@ -1,0 +1,107 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":pinDigests",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "automerge": false,
+  "dependencyDashboard": true,
+  "ignoreScripts": true,
+  "timezone": "Asia/Bangkok",
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "rangeStrategy": "pin",
+  "ignoreUnstable": true,
+  "minimumReleaseAge": null,
+  "schedule": [
+    "at any time"
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "at any time"
+    ]
+  },
+  "github-actions": {
+    "managerFilePatterns": [
+      "/^templates/.*\\.ya?ml$/"
+    ]
+  },
+  "packageRules": [
+    {
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "groupName": null
+    },
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "enabled": false
+    },
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchFileNames": [
+        ".github/workflows/**",
+        "action.yml",
+        "action.yaml",
+        "templates/**",
+        ".github/actions/**"
+      ],
+      "matchDepTypes": [
+        "uses-with",
+        "container",
+        "service",
+        "docker",
+        "github-runner"
+      ],
+      "enabled": true
+    },
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchPackageNames": [
+        "splrad/steward"
+      ],
+      "enabled": false
+    },
+    {
+      "matchManagers": [
+        "mise"
+      ],
+      "matchPackageNames": [
+        "node"
+      ],
+      "versioning": "semver",
+      "ignoreUnstable": true
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/settings-sync\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=github-tags depName=(?<depName>github-community-projects/safe-settings)\\s+ref: (?<currentDigest>[a-f0-9]{40}) # (?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "semver"
+    }
+  ],
+  "enabledManagers": [
+    "mise",
+    "github-actions",
+    "custom.regex"
+  ],
+  "ignorePaths": [
+    ".github/workflows/pr-title.yml",
+    ".github/workflows/pr-labeler.yml",
+    ".github/labeler.yml"
+  ]
+}
