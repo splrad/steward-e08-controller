@@ -7,7 +7,7 @@ const mode=process.argv[2];
 const secretNames=['STEWARD_COPILOT_TOKEN','STEWARD_APP_PRIVATE_KEY','E08_RELEASE_ONLY','E08_NOTES_ONLY'];
 const result={schemaVersion:1,scope:'synthetic Environment and production subprocess routing',mode,runId:Number(process.env.GITHUB_RUN_ID),attempt:Number(process.env.GITHUB_RUN_ATTEMPT),ref:process.env.GITHUB_REF,head:process.env.GITHUB_SHA};
 if(mode==='build'||mode==='observe'){
-  for(const key of secretNames)assert.equal(process.env[key]??'','',`UNEXPECTED_${key}`);
+  for(const key of secretNames)if(process.env[key])throw Error(`UNEXPECTED_${key}`);
   result.status='ISOLATED';
 }else{
   assert.ok(['release','quality','missing'].includes(mode));
@@ -17,7 +17,7 @@ if(mode==='build'||mode==='observe'){
   if(mode!=='missing'){
     assert.ok(process.env.STEWARD_APP_PRIVATE_KEY);
     assert.ok(process.env[mode==='release'?'E08_RELEASE_ONLY':'E08_NOTES_ONLY']);
-    assert.equal(process.env[mode==='release'?'E08_NOTES_ONLY':'E08_RELEASE_ONLY']??'','');
+    if(process.env[mode==='release'?'E08_NOTES_ONLY':'E08_RELEASE_ONLY'])throw Error('UNEXPECTED_OTHER_ENVIRONMENT_SECRET');
   }
   const sandbox=resolve('e08-environment/model-'+mode);
   await mkdir(sandbox+'/tools/quality-language',{recursive:true});

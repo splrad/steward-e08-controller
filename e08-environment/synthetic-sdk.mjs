@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 const blocked=['STEWARD_APP_PRIVATE_KEY','GOVERNANCE_APP_PRIVATE_KEY','GH_TOKEN','GITHUB_TOKEN','POLICY_READ_TOKEN','E08_RELEASE_ONLY','E08_NOTES_ONLY','E08_ACCEPTED_REVISIONS','E08_EXPECTED_REVISION','NODE_OPTIONS','HTTPS_PROXY','COPILOT_HOME'];
-for(const key of blocked)assert.equal(process.env[key],undefined,'CHILD_ENVIRONMENT_LEAK');
+for(const key of blocked)if(Object.hasOwn(process.env,key))throw Error('CHILD_ENVIRONMENT_LEAK');
 assert.equal(process.env.HOME,process.cwd());
 const token=JSON.parse(process.env.STEWARD_COPILOT_TOKEN);
 assert.equal(token.scope,'E08_SYNTHETIC_ONLY');
