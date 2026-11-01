@@ -61,6 +61,33 @@
       "nativeResponseEvidencePath": null,
       "continuationOfRunId": null,
       "retryLimitEvidencePath": null
+    },
+    {
+      "requestKey": "2be6ad7473681dfebb071ef46fe22b74eb68e05f2a82af2436d555a3b4249589",
+      "operationKey": "cc156e21af84c8ee23bf10953db3ab994a602a58ba543a8aa6a86c9891457767",
+      "purpose": "channel-verify",
+      "workflowId": 403392871,
+      "ref": "e08-channel-trunk",
+      "sourceSha": "0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+      "targetKey": "[403392871,\"e08-channel-trunk\",\"10ed9e9de4161a19dad3c66c8f4618ba07cb80bb\",\"0d6319c44683bb7a6f21dd4e4591e87c3255d18b\",[\"app\"],[\"winget\"],\"verify\"]",
+      "executionSha": "10ed9e9de4161a19dad3c66c8f4618ba07cb80bb",
+      "inputs": {
+        "cycle_id": "pr-805-0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+        "source_sha": "0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+        "execution_sha": "10ed9e9de4161a19dad3c66c8f4618ba07cb80bb",
+        "controller_sha": "8d91ff3210ca147895e158cf35b00ac3847b6be2",
+        "targets_json": "[{\"unitId\":\"app\",\"channelId\":\"winget\",\"version\":\"1.0.0\",\"releaseId\":430443628,\"manifestDigest\":\"796fede3d6085ef990912c56d0e33f515f90feff486093cf2821404ba62437cd\"}]",
+        "mode": "verify",
+        "operation_key": "cc156e21af84c8ee23bf10953db3ab994a602a58ba543a8aa6a86c9891457767",
+        "request_key": "2be6ad7473681dfebb071ef46fe22b74eb68e05f2a82af2436d555a3b4249589"
+      },
+      "inputDigest": "4e24654396281113a2c0215d4253a8e89279db71bc54cc95853fd11ca126b0fc",
+      "sentAt": "2026-11-01T09:04:42.000Z",
+      "searchWindows": [],
+      "canonicalRunId": null,
+      "nativeResponseEvidencePath": null,
+      "continuationOfRunId": null,
+      "retryLimitEvidencePath": null
     }
   ],
   "publications": [],
