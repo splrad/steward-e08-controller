@@ -174,3 +174,30 @@ jobs:
     steps:
       - name: Untrusted branch must be stopped by Environment
         run: echo ENVIRONMENT_POLICY_UNEXPECTEDLY_ALLOWED; exit 1
+  diagnostic-guard:
+    if: github.repository == 'splrad/steward-e08-controller' && github.repository_id
+      == '1440689456' && github.ref == format('refs/heads/{0}',
+      github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: steward-release
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Reject secret-bearing diagnostics
+        env:
+          STEWARD_COPILOT_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          STEWARD_APP_PRIVATE_KEY: ${{ secrets.STEWARD_APP_PRIVATE_KEY }}
+          E08_RELEASE_ONLY: ${{ secrets.E08_RELEASE_ONLY }}
+          E08_NOTES_ONLY: ${{ secrets.E08_NOTES_ONLY }}
+        run: node e08-environment/diagnostic-check.mjs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: environment-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: e08-results/*.json
+          if-no-files-found: error
+          retention-days: 90
