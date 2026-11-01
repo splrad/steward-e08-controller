@@ -61,6 +61,33 @@
       "nativeResponseEvidencePath": "evidence/dispatch/3d53c85088c5b472b38171e4bbfb6fa1dad8f5c0973c131b91bbaa8e246ddd22.json",
       "continuationOfRunId": null,
       "retryLimitEvidencePath": null
+    },
+    {
+      "requestKey": "cad63802b2a45e4eee7b7a1628204c91b5a783ebb2b296bcd15f52eace628918",
+      "operationKey": "8e40afe602aeb18c481b1fa4f2979b3c958168f389060a48a01e607ba2c96396",
+      "purpose": "channel-verify",
+      "workflowId": 403392871,
+      "ref": "e08-channel-trunk",
+      "sourceSha": "0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+      "targetKey": "[403392871,\"e08-channel-trunk\",\"904007a2f3a87ffcd15481f2d7768b86b409fe4e\",\"0d6319c44683bb7a6f21dd4e4591e87c3255d18b\",[\"app\"],[\"winget\"],\"verify\"]",
+      "executionSha": "904007a2f3a87ffcd15481f2d7768b86b409fe4e",
+      "inputs": {
+        "cycle_id": "pr-809-0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+        "source_sha": "0d6319c44683bb7a6f21dd4e4591e87c3255d18b",
+        "execution_sha": "904007a2f3a87ffcd15481f2d7768b86b409fe4e",
+        "controller_sha": "8d91ff3210ca147895e158cf35b00ac3847b6be2",
+        "targets_json": "[{\"unitId\":\"app\",\"channelId\":\"winget\",\"version\":\"1.0.0\",\"releaseId\":430443628,\"manifestDigest\":\"796fede3d6085ef990912c56d0e33f515f90feff486093cf2821404ba62437cd\"}]",
+        "mode": "verify",
+        "operation_key": "8e40afe602aeb18c481b1fa4f2979b3c958168f389060a48a01e607ba2c96396",
+        "request_key": "cad63802b2a45e4eee7b7a1628204c91b5a783ebb2b296bcd15f52eace628918"
+      },
+      "inputDigest": "afe71c9d6a483ebc18b968156ae9a3dc7e33db9dbffd119c04f36daf8c5f2ac8",
+      "sentAt": "2026-11-01T10:40:50.000Z",
+      "searchWindows": [],
+      "canonicalRunId": null,
+      "nativeResponseEvidencePath": null,
+      "continuationOfRunId": 41296782432,
+      "retryLimitEvidencePath": "evidence/retry-limit/cd7ab50e992f2becafa214431234e63c09fc4973315a7370dd311be3fabe2a67.json"
     }
   ],
   "publications": [],
