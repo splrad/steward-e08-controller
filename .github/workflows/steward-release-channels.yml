@@ -93,7 +93,7 @@ jobs:
       matrix: ${{ steps.native.outputs.matrix }}
     steps:
       - name: E08 forged platform limit message
-        if: needs.source-check.outputs.forged_limit == 'true'
+        if: needs.source-check.outputs.forged_limit == 'true' && github.run_attempt == 1
         run: |
           echo "::error::You've exceeded the maximum number of rerun attempts (50) for this workflow run."
           exit 1
