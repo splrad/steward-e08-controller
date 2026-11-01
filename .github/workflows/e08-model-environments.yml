@@ -1,0 +1,165 @@
+name: E08 Model Environments
+run-name: E08 Environment ${{ inputs.case_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      case_id:
+        type: string
+        required: true
+      release_revision:
+        type: string
+        required: true
+      quality_revision:
+        type: string
+        required: true
+      accepted_revisions:
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: e08-model-environments
+  cancel-in-progress: false
+jobs:
+  release-coordinator:
+    if: github.repository == 'splrad/steward-e08-controller' && github.repository_id
+      == '1440689456' && github.ref == format('refs/heads/{0}',
+      github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: steward-release
+      deployment: false
+    steps:
+      - &a1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Production subprocess with synthetic SDK
+        env:
+          STEWARD_COPILOT_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          STEWARD_APP_PRIVATE_KEY: ${{ secrets.STEWARD_APP_PRIVATE_KEY }}
+          E08_RELEASE_ONLY: ${{ secrets.E08_RELEASE_ONLY }}
+          E08_NOTES_ONLY: ${{ secrets.E08_NOTES_ONLY }}
+          E08_EXPECTED_REVISION: ${{ inputs.release_revision }}
+          E08_ACCEPTED_REVISIONS: ${{ inputs.accepted_revisions }}
+        run: node e08-environment/environment-worker.mjs release
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: environment-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: e08-results/*.json
+          if-no-files-found: error
+          retention-days: 90
+  quality-summary:
+    if: github.repository == 'splrad/steward-e08-controller' && github.repository_id
+      == '1440689456' && github.ref == format('refs/heads/{0}',
+      github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: steward-release-notes
+      deployment: false
+    steps:
+      - *a1
+      - name: Production subprocess with synthetic SDK
+        env:
+          STEWARD_COPILOT_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          STEWARD_APP_PRIVATE_KEY: ${{ secrets.STEWARD_APP_PRIVATE_KEY }}
+          E08_RELEASE_ONLY: ${{ secrets.E08_RELEASE_ONLY }}
+          E08_NOTES_ONLY: ${{ secrets.E08_NOTES_ONLY }}
+          E08_EXPECTED_REVISION: ${{ inputs.quality_revision }}
+          E08_ACCEPTED_REVISIONS: ${{ inputs.accepted_revisions }}
+        run: node e08-environment/environment-worker.mjs quality
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: environment-quality-${{ github.run_id }}-${{ github.run_attempt }}
+          path: e08-results/*.json
+          if-no-files-found: error
+          retention-days: 90
+  build:
+    if: github.repository == 'splrad/steward-e08-controller' && github.repository_id
+      == '1440689456' && github.ref == format('refs/heads/{0}',
+      github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - *a1
+      - name: Check native secret scope
+        env:
+          STEWARD_COPILOT_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          STEWARD_APP_PRIVATE_KEY: ${{ secrets.STEWARD_APP_PRIVATE_KEY }}
+          E08_RELEASE_ONLY: ${{ secrets.E08_RELEASE_ONLY }}
+          E08_NOTES_ONLY: ${{ secrets.E08_NOTES_ONLY }}
+          E08_EXPECTED_REVISION: "0"
+          E08_ACCEPTED_REVISIONS: "[1,2]"
+        run: node e08-environment/environment-worker.mjs build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: environment-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: e08-results/*.json
+          if-no-files-found: error
+          retention-days: 90
+  observe:
+    if: github.repository == 'splrad/steward-e08-controller' && github.repository_id
+      == '1440689456' && github.ref == format('refs/heads/{0}',
+      github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - *a1
+      - name: Check native secret scope
+        env:
+          STEWARD_COPILOT_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          STEWARD_APP_PRIVATE_KEY: ${{ secrets.STEWARD_APP_PRIVATE_KEY }}
+          E08_RELEASE_ONLY: ${{ secrets.E08_RELEASE_ONLY }}
+          E08_NOTES_ONLY: ${{ secrets.E08_NOTES_ONLY }}
+          E08_EXPECTED_REVISION: "0"
+          E08_ACCEPTED_REVISIONS: "[1,2]"
+        run: node e08-environment/environment-worker.mjs observe
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: environment-observe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: e08-results/*.json
+          if-no-files-found: error
+          retention-days: 90
+    environment:
+      name: channel-read
+      deployment: false
+  missing:
+    if: github.repository == 'splrad/steward-e08-controller' && github.repository_id
+      == '1440689456' && github.ref == format('refs/heads/{0}',
+      github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - *a1
+      - name: Check native secret scope
+        env:
+          STEWARD_COPILOT_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          STEWARD_APP_PRIVATE_KEY: ${{ secrets.STEWARD_APP_PRIVATE_KEY }}
+          E08_RELEASE_ONLY: ${{ secrets.E08_RELEASE_ONLY }}
+          E08_NOTES_ONLY: ${{ secrets.E08_NOTES_ONLY }}
+          E08_EXPECTED_REVISION: "0"
+          E08_ACCEPTED_REVISIONS: "[1,2]"
+        run: node e08-environment/environment-worker.mjs missing
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: environment-missing-${{ github.run_id }}-${{ github.run_attempt }}
+          path: e08-results/*.json
+          if-no-files-found: error
+          retention-days: 90
+    environment:
+      name: e08-model-missing
+      deployment: false
+  native-policy-denial:
+    if: github.ref != format('refs/heads/{0}',
+      github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    environment:
+      name: steward-release
+      deployment: false
+    steps:
+      - name: Untrusted branch must be stopped by Environment
+        run: echo ENVIRONMENT_POLICY_UNEXPECTEDLY_ALLOWED; exit 1
