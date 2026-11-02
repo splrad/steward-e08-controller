@@ -19,7 +19,7 @@ test('acknowledged revoke waits until a 401 is observed',async()=>{
   const f=fixture([200,204,200,200,401]);const [r]=await verifyRevocations(['secret'],f.options);
   assert.equal(r.status,'PASS');assert.deepEqual(r.reads.map(x=>x.status),[200,200,401]);
   assert.deepEqual(f.waits,[250,500]);assert.equal(f.calls.filter(x=>x.method==='DELETE').length,1);
-  assert.ok(f.calls.every(x=>x.signal instanceof AbortSignal&&x.cache==='no-cache'));
+  assert.ok(f.calls.every(x=>(x.signal instanceof AbortSignal) && (x.cache === 'no-cache')));
 });
 test('accepted DELETE with persistent 200 fails at the bounded limit',async()=>{
   const f=fixture([200,204,...Array(6).fill(200)]);const [r]=await verifyRevocations(['secret'],f.options);
