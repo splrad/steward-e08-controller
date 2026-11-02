@@ -85,10 +85,22 @@ try{
       await git('fetch','--no-tags','origin','main');await git('checkout','--detach','FETCH_HEAD');
       const request={directory,writeDirectory:join(root,'candidate-writes'),remote:'https://github.com/'+repository.full_name+'.git',repository:repository.full_name,
         repositoryId:repository.id,defaultBranch:'main',appBotId:app.appBotId,identity:{name:app.appBotLogin,email:app.appBotId+'+'+app.appBotLogin+'@users.noreply.github.com'}};
-      const language={preflight:async()=> 'WAIT_AUTH',call:async()=>{evidence.modelCalls++;throw Error('MODEL_CALL_NOT_EXPECTED');}};
+      const stateSnapshot=async()=>{
+        await git('fetch','--no-tags',request.remote,'refs/heads/steward/release-state');
+        const head=await git('rev-parse','FETCH_HEAD');
+        await git('update-ref','refs/heads/steward/release-state',head);
+        const state=await (await import(record)).readReleaseRecords({directory,targetRef:'steward/release-state',repositoryId:repository.id});
+        check(state.head===head&&Boolean(state.repository.activeCycleId),'CANDIDATE_ACTIVE_CYCLE_REQUIRED');
+        return {head,cycleId:state.repository.activeCycleId,stateDigest:hash(await git('show',head+':state.json')),
+          cycleDigest:hash(await git('show',head+':cycles/'+state.repository.activeCycleId+'.json'))};
+      };
+      const before=await stateSnapshot();evidence.candidateBefore=before;
+      const language={preflight:async()=>{throw Error('MODEL_PREFLIGHT_NOT_EXPECTED');},call:async()=>{evidence.modelCalls++;throw Error('MODEL_CALL_NOT_EXPECTED');}};
       for(let pass=1;pass<=2;pass++){
         const result=await app.forCandidateRepository(repository.id,(token,readToken)=>(awaitCandidate(token,readToken)));
-        evidence.results.push({pass,...result});check(['WAIT','CYCLE_READY','READY'].includes(result.status),'CANDIDATE_CONSUMER_RESULT');
+        const after=await stateSnapshot();evidence.results.push({pass,...result,state:after});
+        check(result.status==='WAIT'&&result.reason==='ACTIVE_CYCLE','CANDIDATE_CONSUMER_RESULT');
+        check(JSON.stringify(after)===JSON.stringify(before),'CANDIDATE_CYCLE_CHANGED');
       }
       async function awaitCandidate(token,readToken){return (await import(candidate)).nativeReleaseCandidate(request,{token,readToken,
         controllerSha:env.GITHUB_SHA,controllerDirectory:tree,language,fetcher:transport,temporaryRoot:root});}
