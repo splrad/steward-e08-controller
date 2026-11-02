@@ -56,8 +56,11 @@ const repository={id:1440689606,full_name:'splrad/steward-e08-bootstrap',default
     const bootstrap=await bind('scripts/repository-bootstrap.mjs',[
       ['splrad/steward','splrad/steward-e08-controller'],['1296724484','1440689456'],['4243096','5553347'],
       ["'./release-record.mjs'","'"+record+"'"],["'./quality-language-summary.mjs'","'"+quality+"'"]]);
-    await (await import(bootstrap)).main();check(!process.exitCode,'BOOTSTRAP_CONSUMER_FAILED');
-    evidence.results.push({status:'DISCOVERY_COMPLETED',sample:'Existing repository continuation; prior empty-repository windows retained'});
+    for(let pass=1;pass<=2;pass++){
+      const counts=await (await import(bootstrap)).main(transport);
+      evidence.results.push({pass,counts,sample:'Existing repository continuation; prior empty-repository windows retained'});
+      check(!process.exitCode&&counts.repositories===3&&counts.existing===3&&counts.ready===0&&counts.failed===0,'BOOTSTRAP_CONSUMER_FAILED');
+    }
   }else{
     const app=await (await import(auth)).nativeReleaseApp(env.STEWARD_APP_PRIVATE_KEY,transport);
     const repositories=await app.discover();check(repositories.length===3&&repositories.some(r=>r.id===repository.id),'INSTALLATION_SCOPE');

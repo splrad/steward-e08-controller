@@ -1,4 +1,5 @@
-import {expect,it} from 'vitest';
+import {expect,it,vi} from 'vitest';
+import {generateKeyPairSync} from 'node:crypto';
 import {readFile,mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
@@ -11,6 +12,44 @@ import {isolatedBuildEnvironment} from '../src/build-environment.js';
 import {registerOfflineFixtureRoot} from './offline-fixtures.js';
 
 const module=()=>import(pathToFileURL(resolve('scripts/repository-bootstrap.mjs')).href);
+it('real bootstrap entry separates public bot discovery from App and scoped installation authentication',async()=>{
+  const {main}=await module(),{privateKey}=generateKeyPairSync('rsa',{modulusLength:2048});
+  const values={GITHUB_REPOSITORY:'splrad/steward',GITHUB_REPOSITORY_ID:'1296724484',GITHUB_REF:'refs/heads/main',
+    STEWARD_DEFAULT_BRANCH:'main',GITHUB_EVENT_NAME:'workflow_dispatch',STEWARD_CONTROLLER_SHA:'a'.repeat(40),
+    GOVERNANCE_APP_ID:'88',GOVERNANCE_APP_PRIVATE_KEY:privateKey.export({type:'pkcs8',format:'pem'}).toString(),
+    GITHUB_TOKEN:'workflow-fixture',GITHUB_RUN_ID:'21',GITHUB_RUN_ATTEMPT:'1',GITHUB_STEP_SUMMARY:''};
+  for(const [key,value] of Object.entries(values))vi.stubEnv(key,value);
+  const repository={id:12,name:'fixture',full_name:'splrad/fixture',default_branch:'develop',owner:{id:302208797},archived:false,disabled:false};
+  const calls:{path:string;method:string;body:any}[]=[],requests:any[]=[],revoked:string[]=[];
+  let credential=0;
+  const transport=async(input:any,init:any)=>{
+    const url=new URL(String(input)),path=decodeURIComponent(url.pathname),method=init.method??'GET',headers=new Headers(init.headers);
+    const body=init.body?JSON.parse(init.body):undefined;calls.push({path,method,body});
+    expect(url.origin).toBe('https://api.github.com');expect(headers.get('x-github-api-version')).toBe('2026-03-10');
+    let value:any,status=200;
+    if(path==='/app')value={id:88,slug:'fixture-governance'};
+    else if(path==='/orgs/splrad/installation')value={id:8,app_id:88,account:{id:302208797},suspended_at:null};
+    else if(path==='/users/fixture-governance[bot]'){
+      expect(headers.has('authorization')).toBe(false);value={id:33,login:'fixture-governance[bot]',type:'Bot'};
+    }else if(path==='/repos/splrad/steward/actions/runs/21')value={workflow_id:42};
+    else if(path==='/app/installations/8/access_tokens'){
+      expect(headers.get('authorization')).toMatch(/^bearer /i);requests.push(body);credential++;
+      value={token:'ghs_fixture'+credential,expires_at:new Date(Date.now()+3600000).toISOString()};status=201;
+    }else if(path==='/installation/repositories')value={total_count:1,repositories:[repository]};
+    else if(path==='/installation/token'&&method==='DELETE'){revoked.push(headers.get('authorization')!);status=204;}
+    else if(path==='/repos/splrad/fixture')value=repository;
+    else if(path==='/repos/splrad/fixture/actions/variables/STEWARD_BOOTSTRAP_RECOVERY'){status=404;value={message:'Not Found'};}
+    else if(path==='/repos/splrad/fixture/git/matching-refs/')value=[{ref:'refs/heads/develop',object:{sha:'b'.repeat(40)}}];
+    else throw Error('UNEXPECTED_BOOTSTRAP_ENDPOINT');
+    return new Response(status===204?null:JSON.stringify(value),{status,headers:{'content-type':'application/json'}});
+  };
+  try{
+    expect(await main(transport)).toEqual({repositories:1,ready:0,existing:1,failed:0});
+    expect(requests).toEqual([{permissions:{metadata:'read'}},{repository_ids:[12],permissions:{metadata:'read',contents:'write',administration:'write',actions_variables:'write',organization_administration:'write'}}]);
+    expect(revoked).toHaveLength(2);expect(new Set(revoked).size).toBe(2);
+    expect(calls.filter(c=>!['GET','DELETE'].includes(c.method)).map(c=>c.path)).toEqual(['/app/installations/8/access_tokens','/app/installations/8/access_tokens']);
+  }finally{vi.unstubAllEnvs();}
+});
 const actors=[4243096,88].map(actor_id=>({actor_id,actor_type:'Integration',bypass_mode:'always'}));
 const nativeRule=(id:number)=>({id,source:'splrad',source_type:'Organization',enforcement:'active',target:'branch',
   conditions:{ref_name:{include:['refs/heads/steward/governance-state'],exclude:[]},repository_name:{include:['~ALL'],exclude:[],protected:false}},

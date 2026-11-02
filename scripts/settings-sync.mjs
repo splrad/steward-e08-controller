@@ -80,7 +80,7 @@ export async function main() {
   app.hook.before('request',options=>{options.headers['x-github-api-version']='2026-03-10';});
   const fact=(await app.request('GET /app')).data, installation=(await app.request('GET /orgs/splrad/installation')).data;
   check(fact.id===governanceAppId && installation.app_id===governanceAppId && installation.account?.id===302208797 && !installation.suspended_at,'SETTINGS_APP_IDENTITY');
-  const bot=(await app.request('GET /users/{username}',{username:fact.slug+'[bot]'})).data;
+  const bot=(await new Octokit({log}).request('GET /users/{username}',{username:fact.slug+'[bot]',headers:{'x-github-api-version':'2026-03-10'}})).data;
   check(bot.type==='Bot' && Number.isSafeInteger(bot.id),'SETTINGS_BOT_IDENTITY');
   const identity={name:bot.login,email:`${bot.id}+${bot.login}@users.noreply.github.com`};
   const root=await mkdtemp(join(tmpdir(),'steward-settings-')),profile=await mkdtemp(join(root,'profile-')),output=join(root,'result.json');
