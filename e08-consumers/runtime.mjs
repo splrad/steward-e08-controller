@@ -1,3 +1,4 @@
+import {verifyRevocations} from './revocation.mjs';
 // E08 isolated native consumer entry. Production functions are imported with recorded identity bindings.
 import {readFile,writeFile,mkdir,mkdtemp} from 'node:fs/promises';
 import {resolve,join,dirname} from 'node:path';
@@ -161,14 +162,8 @@ const repository={id:1440689606,full_name:'splrad/steward-e08-bootstrap',default
   evidence.status='PASS';
 }catch(error){evidence.status='FAIL';evidence.error=/^[A-Z][A-Z0-9_: -]+$/.test(error.message)?error.message:'CONSUMER_UNAVAILABLE';process.exitCode=1;}
 finally{
-  for(const token of tokens){
-    const headers={authorization:'Bearer '+token,'x-github-api-version':'2026-03-10'};
-    let response=await fetch('https://api.github.com/installation/repositories',{headers});await response.body?.cancel();
-    const result={status:response.status};
-    if(response.status!==401){response=await fetch('https://api.github.com/installation/token',{method:'DELETE',headers});result.revokeStatus=response.status;await response.body?.cancel();
-      response=await fetch('https://api.github.com/installation/repositories',{headers});result.finalStatus=response.status;await response.body?.cancel();}
-    evidence.revocations.push(result);if((result.finalStatus??result.status)!==401){evidence.status='FAIL';process.exitCode=1;}
-  }
+  evidence.revocations=await verifyRevocations(tokens);
+  if(evidence.revocations.some(result=>result.status!=='PASS')){evidence.status='FAIL';process.exitCode=1;}
   await writeFile(join(output,mode+'.json'),JSON.stringify(evidence,null,2)+'\n',{flag:'wx'});
   console.log(JSON.stringify({mode,status:evidence.status,results:evidence.results,error:evidence.error}));
 }
