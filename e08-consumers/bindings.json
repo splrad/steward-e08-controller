@@ -1,0 +1,53 @@
+{
+  "source": "candidate/",
+  "templateBindings": [
+    {
+      "path": "tools/template/delivery.py",
+      "sourceSha256": "cc494de54dea23eb1d0533fa815e9690b17e0a39f81a1fad6eded7fa985d57a5",
+      "boundSha256": "1df879e3747602e8bbac2e0d8eb01f45f2bfedce7bacd36dcc3406e97c1cc9e8",
+      "replacements": [
+        [
+          "CENTRAL = 'splrad/steward'",
+          "CENTRAL = 'splrad/steward-e08-controller'"
+        ],
+        [
+          "CENTRAL_ID = 1296724484",
+          "CENTRAL_ID = 1440689456"
+        ],
+        [
+          "APP_ID = 4243096",
+          "APP_ID = 5553347"
+        ],
+        [
+          "run['head_branch'] == 'main'",
+          "run['head_branch'] in ['main', 'e08-channel-trunk']"
+        ]
+      ]
+    },
+    {
+      "path": "tools/template/copier_bridge.py",
+      "sourceSha256": "7fb76d3989e79365e7b36d5d5d9db72ea7f334d610090139ac72070779e47368",
+      "boundSha256": "df234bc088af815ea0ebaf0e244f8a0690c5c4cf0155e48ee8f23f90c031ffc8",
+      "replacements": [
+        [
+          "SOURCE = 'https://github.com/splrad/steward.git'",
+          "SOURCE = 'https://github.com/splrad/steward-e08-controller.git'"
+        ]
+      ]
+    },
+    {
+      "path": "tools/template/test_delivery.py",
+      "sourceSha256": "cea14a647977da833b5f6416d20708de57df4cdaf44838a4c5e95036fcdb5f5f",
+      "boundSha256": "7e86c7a24dd37e642f838f5fac6f99c3cb276d35f41f19ffae8d670afecc7865",
+      "replacements": [
+        [
+          "actor_id':4243096",
+          "actor_id':5553347"
+        ]
+      ]
+    }
+  ],
+  "priorMergedSha": "8fade180cff5587156809ff577739be8eae10d7e",
+  "runtimeSha256": "8ea0a8f10fa13dbc012b72461b7df55ce95138fd6592c2d95032145289c23a42",
+  "sourceManifestSha256": "10922d0e1fd2703eefb5c70f0c43b9b22bfcaa38e86405a0b69d67dae18a1640"
+}

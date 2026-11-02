@@ -12,9 +12,9 @@ import yaml
 import copier_bridge as copier
 
 BRANCH = 'steward/managed-sync'
-CENTRAL = 'splrad/steward'
-CENTRAL_ID = 1296724484
-APP_ID = 4243096
+CENTRAL = 'splrad/steward-e08-controller'
+CENTRAL_ID = 1440689456
+APP_ID = 5553347
 SHA = re.compile(r'[a-f0-9]{40}')
 
 
@@ -205,7 +205,7 @@ def deliver(request, api, central_api, *, read_token=None, renderer=copier.rende
         def verify_run(run_id, source):
             run = central_api.request('GET', f'/repos/{CENTRAL}/actions/runs/{run_id}')
             require(run['id'] == run_id and run['repository']['id'] == CENTRAL_ID and run['head_repository']['id'] == CENTRAL_ID
-                    and run['head_sha'] == source and run['head_branch'] == 'main'
+                    and run['head_sha'] == source and run['head_branch'] in ['main', 'e08-channel-trunk']
                     and run['event'] in ['push', 'schedule', 'workflow_dispatch'], 'SOURCE_RUN')
             workflow = central_api.request('GET', f"/repos/{CENTRAL}/actions/workflows/{run['workflow_id']}")
             require(workflow['path'] == '.github/workflows/sync-managed.yml' and workflow['state'] == 'active', 'SOURCE_WORKFLOW')

@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 import yaml
 from packaging.version import Version, InvalidVersion
 
-SOURCE = 'https://github.com/splrad/steward.git'
+SOURCE = 'https://github.com/splrad/steward-e08-controller.git'
 INTERNAL = {'_min_copier_version', '_subdirectory', '_answers_file'}
 FORBIDDEN = {'VERSION', 'CHANGELOG.md', 'package.json', 'package-lock.json',
              '.release-please-manifest.json', 'release-please-config.json',

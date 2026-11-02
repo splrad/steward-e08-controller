@@ -266,7 +266,7 @@ class FixtureAPI:
             return [] if self.invalid=='protection' else [{'type':kind,'ruleset_id':i} for i,kind in enumerate(['creation','non_fast_forward','deletion'],1)]
         if '/rulesets/' in route:
             i=int(route.rsplit('/',1)[1]);return {'id':i,'enforcement':'active','rules':[{'type':['creation','non_fast_forward','deletion'][i-1]}],
-                **({} if self.invalid=='bypass-unreadable' else {'bypass_actors':[{'actor_id':4243096,'actor_type':'Integration','bypass_mode':'always'}] if i==1 else []})}
+                **({} if self.invalid=='bypass-unreadable' else {'bypass_actors':[{'actor_id':5553347,'actor_type':'Integration','bypass_mode':'always'}] if i==1 else []})}
         if '/actions/runs/' in route:
             return {'id':int(route.rsplit('/',1)[1]),'repository':{'id':CENTRAL_ID},'head_repository':{'id':0 if self.invalid=='run' else CENTRAL_ID},
                     'head_sha':t.new,'head_branch':'main','event':'workflow_dispatch','workflow_id':42}

@@ -1,9 +1,203 @@
-name: E08 Native Template Source
-on: workflow_dispatch
+name: E08 Independent Native Consumers
+on:
+  workflow_dispatch:
 permissions:
   contents: read
+  actions: read
+concurrency:
+  group: e08-independent-native-consumers
+  cancel-in-progress: false
+  queue: max
 jobs:
-  evidence:
-    runs-on: ubuntu-latest
+  bootstrap:
+    if: github.repository == 'splrad/steward-e08-controller' && github.repository_id == '1440689456' && github.ref == 'refs/heads/e08-channel-trunk'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: e08-consumers
+      deployment: false
     steps:
-      - run: echo "E08 template source identity"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d
+        env:
+          MISE_SAFE: '1'
+          MISE_NODE_COMPILE: 'false'
+        with:
+          version: 2026.10.24
+          install_args: --locked
+          cache: false
+          env: false
+          persist_github_token: false
+      - name: Activate locked tool paths
+        shell: bash
+        env:
+          MISE_SAFE: '1'
+          MISE_LOCKED: '1'
+        run: mise bin-paths >> "$GITHUB_PATH"
+      - name: Install locked dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          uv sync --project tools/template --frozen --no-dev
+      - name: Execute native bootstrap consumer and replay
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STEWARD_DEFAULT_BRANCH: e08-channel-trunk
+          STEWARD_CONTROLLER_SHA: ${{ github.workflow_sha }}
+          GOVERNANCE_APP_ID: '5553375'
+          GOVERNANCE_APP_PRIVATE_KEY: ${{ secrets.GOVERNANCE_APP_PRIVATE_KEY }}
+        run: node e08-consumers/runtime.mjs bootstrap
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ always() }}
+        with:
+          name: e08-consumer-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}
+          path: consumer-evidence/bootstrap.json
+          if-no-files-found: error
+          retention-days: 90
+  templates:
+    needs: bootstrap
+    if: github.repository == 'splrad/steward-e08-controller' && github.repository_id == '1440689456' && github.ref == 'refs/heads/e08-channel-trunk'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: e08-consumers
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d
+        env:
+          MISE_SAFE: '1'
+          MISE_NODE_COMPILE: 'false'
+        with:
+          version: 2026.10.24
+          install_args: --locked
+          cache: false
+          env: false
+          persist_github_token: false
+      - name: Activate locked tool paths
+        shell: bash
+        env:
+          MISE_SAFE: '1'
+          MISE_LOCKED: '1'
+        run: mise bin-paths >> "$GITHUB_PATH"
+      - name: Install locked dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          uv sync --project tools/template --frozen --no-dev
+      - name: Execute native templates consumer and replay
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STEWARD_DEFAULT_BRANCH: e08-channel-trunk
+          STEWARD_CONTROLLER_SHA: ${{ github.workflow_sha }}
+          STEWARD_APP_PRIVATE_KEY: ${{ secrets.STEWARD_APP_PRIVATE_KEY }}
+        run: node e08-consumers/runtime.mjs templates
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ always() }}
+        with:
+          name: e08-consumer-templates-${{ github.run_id }}-${{ github.run_attempt }}
+          path: consumer-evidence/templates.json
+          if-no-files-found: error
+          retention-days: 90
+  candidate:
+    needs: bootstrap
+    if: github.repository == 'splrad/steward-e08-controller' && github.repository_id == '1440689456' && github.ref == 'refs/heads/e08-channel-trunk'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: e08-consumers
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d
+        env:
+          MISE_SAFE: '1'
+          MISE_NODE_COMPILE: 'false'
+        with:
+          version: 2026.10.24
+          install_args: --locked
+          cache: false
+          env: false
+          persist_github_token: false
+      - name: Activate locked tool paths
+        shell: bash
+        env:
+          MISE_SAFE: '1'
+          MISE_LOCKED: '1'
+        run: mise bin-paths >> "$GITHUB_PATH"
+      - name: Install locked dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          uv sync --project tools/template --frozen --no-dev
+      - name: Execute native candidate consumer and replay
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STEWARD_DEFAULT_BRANCH: e08-channel-trunk
+          STEWARD_CONTROLLER_SHA: ${{ github.workflow_sha }}
+          STEWARD_APP_PRIVATE_KEY: ${{ secrets.STEWARD_APP_PRIVATE_KEY }}
+        run: node e08-consumers/runtime.mjs candidate
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ always() }}
+        with:
+          name: e08-consumer-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: consumer-evidence/candidate.json
+          if-no-files-found: error
+          retention-days: 90
+  quality:
+    needs: templates
+    if: github.repository == 'splrad/steward-e08-controller' && github.repository_id == '1440689456' && github.ref == 'refs/heads/e08-channel-trunk'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: e08-consumers
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d
+        env:
+          MISE_SAFE: '1'
+          MISE_NODE_COMPILE: 'false'
+        with:
+          version: 2026.10.24
+          install_args: --locked
+          cache: false
+          env: false
+          persist_github_token: false
+      - name: Activate locked tool paths
+        shell: bash
+        env:
+          MISE_SAFE: '1'
+          MISE_LOCKED: '1'
+        run: mise bin-paths >> "$GITHUB_PATH"
+      - name: Install locked dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          uv sync --project tools/template --frozen --no-dev
+      - name: Execute native quality consumer and replay
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STEWARD_DEFAULT_BRANCH: e08-channel-trunk
+          STEWARD_CONTROLLER_SHA: ${{ github.workflow_sha }}
+          STEWARD_APP_PRIVATE_KEY: ${{ secrets.STEWARD_APP_PRIVATE_KEY }}
+        run: node e08-consumers/runtime.mjs quality
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ always() }}
+        with:
+          name: e08-consumer-quality-${{ github.run_id }}-${{ github.run_attempt }}
+          path: consumer-evidence/quality.json
+          if-no-files-found: error
+          retention-days: 90
