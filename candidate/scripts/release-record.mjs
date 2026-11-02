@@ -556,7 +556,7 @@ export async function publishNativeCycle(request,{token,io=nativeEvidenceTranspo
       if(unit.assets.length&&JSON.stringify(ordered(unit.assets))!==JSON.stringify(ordered(assets))||unit.manifestDigest!==null&&unit.manifestDigest!==frozen.manifestDigest)fail('frozen publication changed');
       Object.assign(unit,frozen);
     }
-    const adopted=await adoptReleaseCycle(request,snapshot,cycle,{token,io});snapshot=adopted.snapshot;request={...request,directory:adopted.directory};
+    const adopted=await adoptReleaseCycle(request,snapshot,cycle,{token,io});request={...request,directory:adopted.directory};
     // Already-public reentry verifies bytes and does not create a new business invocation.
     if(cycle.units.every(unit=>unit.releaseId!==null)) {
       const releases=await Promise.all(records.map(item=>adapter.read({manifest:item.manifest,directory:item.directory,releaseId:cycle.units.find(unit=>unit.id===item.unitId).releaseId,appBotId:request.appBotId})));

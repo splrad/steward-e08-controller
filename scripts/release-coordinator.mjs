@@ -25,7 +25,7 @@ export async function serviceReleaseWake(request,refresh,invoke) {
   if(!snapshot.repository.activeCycleId)return candidate;
   request={...request,cycleId:snapshot.repository.activeCycleId,runId:null};
   const build=await invoke('dispatch-build',request);
-  snapshot=await refresh();
+  await refresh();
   const publish=await invoke('publish',request);
   if(publish.publishInvoked===true)return publish;
   await refresh();const channel=await invoke('dispatch-channel',request);
