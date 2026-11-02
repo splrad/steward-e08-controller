@@ -4,6 +4,7 @@ import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {generateKeyPairSync} from 'node:crypto';
 import YAML from 'yaml';
+import '../../../e08-consumers/revocation.test.mjs';
 const module=()=>import(pathToFileURL(resolve('scripts/governance-promotion.mjs')).href);
 const P='a'.repeat(40),M='b'.repeat(40),T='c'.repeat(40);
 const path='.github/workflows/pr-validation-native.yml';
