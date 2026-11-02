@@ -8,7 +8,7 @@ workflow_run 只接收 main 分支事件，job 先筛选中央仓库的成功 ma
 
 采用前设置真实 `NATIVE_VALIDATION_WORKFLOW_ID`、`GOVERNANCE_APP_ID` 和 `steward-automation/GOVERNANCE_APP_PRIVATE_KEY`，完成首次模板标签与组织规则交接，再启用 `STEWARD_GOVERNANCE_PROMOTION`。这些原生登记和部署状态需要分别回读；本地实现不等于线上启用。
 
-提升与 bootstrap 共用 `steward-governance-mutation` 原生 job 并发组。只更新 Ruleset 18883080 中中央 Native Validation 条目的 `sha`；其他规则与未知字段来自写前最新完整读取。证据保存完整写前、写后对象。原生 PUT 没有 CAS 保证：写后若出现无法合并的外部修改，任务失败并保留事实；丢失响应时先回读，已采用目标 SHA 即成功，仍为旧值才可重试，第三值重新读取后判断。
+提升与 bootstrap 共用 `steward-governance-mutation` 原生 job 并发组。只更新 Ruleset 26296820 中中央 Native Validation 条目的 `sha`；其他规则与未知字段来自写前最新完整读取。证据保存完整写前、写后对象。原生 PUT 没有 CAS 保证：写后若出现无法合并的外部修改，任务失败并保留事实；丢失响应时先回读，已采用目标 SHA 即成功，仍为旧值才可重试，第三值重新读取后判断。
 
 模板比较只包含 `copier.yml` 和 `templates/repository`。实际变化从最新已采用 PEP 440 稳定版本生成严格递增标签，标签固定到同一个已验证提交。SDK 单独变化不产生模板版本。标签创建前后核对全部标签快照和目标指向；同名异对象、外部标签漂移和未知响应不执行覆盖。下一次原生 Copier 递送从已发布标签继续。
 

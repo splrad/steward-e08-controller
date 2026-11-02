@@ -75,8 +75,9 @@ export function prepareQualitySource(source: QualitySource): QualityPrepared {
   const segments = chinese ? [] : chunks.map((bodyMarkdown, segmentIndex): QualitySegment => ({
     sourceCommentId: source.sourceCommentId, sourceCommit: source.sourceCommit, sourceUrl: source.sourceUrl, severity: source.severity,
     bodyMarkdown, segmentIndex, originalIdentifiers: [...new Set([
-      ...[...bodyMarkdown.matchAll(/`+([^`\n]+)`+/g)].map(m => m[1]!),
-      ...bodyMarkdown.match(/(?:[\w.-]+\/)+[\w.-]+|\b[A-Z][A-Z0-9_]+(?:-[A-Z0-9]+)*\b/g) ?? [],
+      ...[...bodyMarkdown.matchAll(/`([^`\n]+)`/g)].map(m => m[1]!),
+      ...(bodyMarkdown.match(/[\w.-]+(?:\/[\w.-]+)*/g) ?? []).flatMap(value => value.includes('/')
+        ? [value] : value.match(/\b[A-Z][A-Z0-9_]+(?:-[A-Z0-9]+)*\b/g) ?? []),
     ])],
   }));
   return { source, segments, preservedBlocks, chinese };

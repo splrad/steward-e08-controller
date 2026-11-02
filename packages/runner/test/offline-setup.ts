@@ -7,7 +7,7 @@ import { resetOfflineFixtures } from './offline-fixtures.js';
 // Hosted Windows can expose the temp directory through an 8.3 alias. Fixtures
 // require a canonical parent; production path/link rejection remains unchanged.
 if (process.platform === 'win32') {
-  const temporary = realpathSync(tmpdir());
+  const temporary = realpathSync.native(tmpdir());
   process.env.TEMP = temporary;
   process.env.TMP = temporary;
 }

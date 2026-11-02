@@ -8,13 +8,13 @@ const module=()=>import(pathToFileURL(resolve('scripts/governance-promotion.mjs'
 const P='a'.repeat(40),M='b'.repeat(40),T='c'.repeat(40);
 const path='.github/workflows/pr-validation-native.yml';
 function source(){
-  const run={id:12,run_attempt:2,workflow_id:5,path,event:'push',head_branch:'main',head_sha:M,status:'completed',conclusion:'success',repository:{id:1296724484},head_repository:{id:1296724484}};
+  const run={id:12,run_attempt:2,workflow_id:5,path,event:'push',head_branch:'e08-channel-trunk',head_sha:M,status:'completed',conclusion:'success',repository:{id:1440689456},head_repository:{id:1440689456}};
   const workflow={id:5,path,name:'SPLRAD Steward / Native Validation',state:'active'};
   const jobs=[{id:8,run_id:12,run_attempt:1,head_sha:M,name:'Scope',status:'completed',conclusion:'success'},
     {id:9,run_id:12,run_attempt:2,head_sha:M,name:'SPLRAD Validation',status:'completed',conclusion:'success'}];
   const fixture={main:M,run,workflow,jobs,calls:[] as string[],request:async(method:string,url:string)=>{
     fixture.calls.push(method+' '+url);expect(method).toBe('GET');
-    if(url.endsWith('/commits/main'))return {status:200,value:{sha:fixture.main}};
+    if(url.endsWith('/commits/e08-channel-trunk'))return {status:200,value:{sha:fixture.main}};
     if(url.endsWith('/actions/workflows/5'))return {status:200,value:workflow};
     if(url.includes('/actions/workflows/5/runs?'))return {status:200,value:{total_count:1,workflow_runs:[run]}};
     if(url.endsWith('/actions/runs/12'))return {status:200,value:structuredClone(run)};
@@ -40,9 +40,9 @@ it('old main, inactive workflow and unvalidated latest main never acquire write 
   f.main=M;f.workflow.state='disabled_manually';expect(await selectPromotion(f,input)).toEqual({status:'DISABLED'});
   f.workflow.state='active';f.run.conclusion='failure';expect(await selectPromotion(f,input)).toEqual({status:'WAITING_VALIDATION'});
 });
-function rule(){return {id:18883080,name:'main',source:'splrad',source_type:'Organization',target:'branch',enforcement:'active',bypass_actors:[],
+function rule(){return {id:26296820,name:'e08-channel-trunk',source:'splrad',source_type:'Organization',target:'branch',enforcement:'active',bypass_actors:[],
   conditions:{repository_name:{include:['~ALL'],exclude:[]},ref_name:{include:['~DEFAULT_BRANCH'],exclude:[]}},
-  rules:[{type:'deletion'},{type:'pull_request',parameters:{future_platform_flag:true}},{type:'workflows',parameters:{do_not_enforce_on_create:true,workflows:[{repository_id:1296724484,path,sha:P},{repository_id:42,path:'other.yml',sha:T}]}}]};}
+  rules:[{type:'deletion'},{type:'pull_request',parameters:{future_platform_flag:true}},{type:'workflows',parameters:{do_not_enforce_on_create:true,workflows:[{repository_id:1440689456,path,sha:P},{repository_id:42,path:'other.yml',sha:T}]}}]};}
 const shaBinding=(r:any)=>r.rules.find((v:any)=>v.type==='workflows').parameters.workflows[0];
 function rulesFixture(mode='success'){
   let current=rule(),writes=0,reads=0;const records:any[]=[];
@@ -94,9 +94,9 @@ it('uses the independent Governance App, one repository, exact permissions and r
   const permissions={organization_administration:'write',contents:'write',metadata:'read'};
   const transport=async(url:string,init:any)=>{
     const p=new URL(url).pathname;calls.push(init.method+' '+p);
-    const data=p==='/app'?{id:765,slug:'splrad-governance'}:p==='/orgs/splrad/installation'?{id:99,app_id:765,account:{id:302208797}}:
-      p==='/app/installations/99/access_tokens'?{token:'fixture',permissions}:p==='/installation/repositories'?{total_count:1,repositories:[{id:1296724484,full_name:'splrad/steward'}]}:null;
-    if(p.endsWith('/access_tokens'))expect(JSON.parse(init.body)).toEqual({repository_ids:[1296724484],permissions});
+    const data=p==='/app'?{id:765,slug:'splrad-e08-governance'}:p==='/orgs/splrad/installation'?{id:99,app_id:765,account:{id:302208797}}:
+      p==='/app/installations/99/access_tokens'?{token:'fixture',permissions}:p==='/installation/repositories'?{total_count:1,repositories:[{id:1440689456,full_name:'splrad/steward-e08-controller'}]}:null;
+    if(p.endsWith('/access_tokens'))expect(JSON.parse(init.body)).toEqual({repository_ids:[1440689456],permissions});
     return p==='/installation/token'?new Response(null,{status:204}):new Response(JSON.stringify(data),{status:p.endsWith('/access_tokens')?201:200,headers:{'content-type':'application/json'}});
   };
   await expect(withGovernanceCredential({GOVERNANCE_APP_ID:'765',GOVERNANCE_APP_PRIVATE_KEY:privateKey},async()=>{throw Error('business failure');},transport)).rejects.toThrow('business failure');
@@ -105,8 +105,8 @@ it('uses the independent Governance App, one repository, exact permissions and r
 it('wires trusted native validation and serialized promotion without upstream artifacts or caches',async()=>{
   const {validationJobNames}=await module(),native=YAML.parse(await readFile('.github/workflows/pr-validation-native.yml','utf8'));
   expect(validationJobNames(native)).toHaveLength(7);expect(JSON.stringify(native)).not.toMatch(/PRIVATE_KEY|environment|secrets\./);
-  const promote=YAML.parse(await readFile('.github/workflows/governance-promotion.yml','utf8')),bootstrap=YAML.parse(await readFile('.github/workflows/sync-managed.yml','utf8'));
-  expect(promote.on.workflow_run).toEqual({workflows:['SPLRAD Steward / Native Validation'],types:['completed'],branches:['main']});
+  const promote=YAML.parse(await readFile('.github/workflows/governance-promotion.yml','utf8')),bootstrap=YAML.parse(await readFile('candidate/.github/workflows/sync-managed.yml','utf8'));
+  expect(promote.on.workflow_run).toEqual({workflows:['SPLRAD Steward / Native Validation'],types:['completed'],branches:['e08-channel-trunk']});
   expect(promote.on.schedule).toEqual([{cron:'37 1 * * *'}]);expect(promote.jobs.promote.concurrency).toEqual(bootstrap.jobs.bootstrap.concurrency);
   expect(JSON.stringify(promote)).not.toMatch(/download-artifact|actions\/cache/);
   expect(promote.jobs.promote.steps.filter((s:any)=>s.env?.GOVERNANCE_APP_PRIVATE_KEY)).toHaveLength(1);
@@ -123,7 +123,7 @@ it.each(['eligible','failed','moved','private-key','forged-preflight'])('preflig
   try {
     const api=await module(),f=source(),definition=YAML.parse(await readFile('.github/workflows/pr-validation-native.yml','utf8'));
     f.jobs.splice(0,f.jobs.length,...api.validationJobNames(definition).map((name:string,i:number)=>({id:100+i,run_id:12,run_attempt:2,head_sha:M,name,status:'completed',conclusion:'success'})));
-    const env:any={GITHUB_REPOSITORY:'splrad/steward',GITHUB_REPOSITORY_ID:'1296724484',GITHUB_REF:'refs/heads/main',STEWARD_CONTROLLER_SHA:M,GITHUB_RUN_ID:'50',GITHUB_EVENT_NAME:'workflow_run',SOURCE_VALIDATION_RUN_ID:'12',NATIVE_VALIDATION_WORKFLOW_ID:'5',GITHUB_TOKEN:'read-only-fixture',GITHUB_OUTPUT:join(directory,'output'),PROMOTION_EVIDENCE_DIRECTORY:directory};
+    const env:any={GITHUB_REPOSITORY:'splrad/steward-e08-controller',GITHUB_REPOSITORY_ID:'1440689456',GITHUB_REF:'refs/heads/e08-channel-trunk',STEWARD_CONTROLLER_SHA:M,GITHUB_RUN_ID:'50',GITHUB_EVENT_NAME:'workflow_run',SOURCE_VALIDATION_RUN_ID:'12',NATIVE_VALIDATION_WORKFLOW_ID:'5',GITHUB_TOKEN:'read-only-fixture',GITHUB_OUTPUT:join(directory,'output'),PROMOTION_EVIDENCE_DIRECTORY:directory};
     const transport=async(url:string,init:any)=>{expect(init.method).toBe('GET');const u=new URL(url),r=await f.request(init.method,u.pathname+u.search);return Response.json(r.value,{status:r.status});};
     if(mode==='failed')f.run.conclusion='failure';if(['moved','forged-preflight'].includes(mode))f.main=T;
     if(mode==='private-key'){

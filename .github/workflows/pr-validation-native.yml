@@ -126,6 +126,20 @@ jobs:
           printf 'WORKFLOW_REPOSITORY=%s\nWORKFLOW_SHA=%s\nWORKFLOW_PATH=%s\n' "$WORKFLOW_REPOSITORY" "$WORKFLOW_SHA" "$WORKFLOW_PATH" >> "$GITHUB_ENV"
       - name: Verify source identity
         run: node policy/scripts/validation-input.mjs
+      - name: Verify isolated executable controller and SDK runtime
+        if: github.repository_id == '1440689456'
+        working-directory: target
+        shell: bash
+        run: |
+          node --input-type=module -e 'import {realpathSync} from "node:fs"; import {realpath} from "node:fs/promises"; import {tmpdir} from "node:os"; console.log(JSON.stringify({temp:tmpdir(),sync:realpathSync(tmpdir()),native:realpathSync.native(tmpdir()),async:await realpath(tmpdir())}));'
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx --no-install vitest run packages/runner/test/governance-promotion.test.ts
+          npm run typecheck
+          npm run verify:config
+          npm run verify:dist
+          npm ci --prefix tools/quality-language --ignore-scripts --no-audit --no-fund
+          npm test --prefix tools/quality-language
+          npm run verify:runtime --prefix tools/quality-language
       - name: Node tests and configuration
         if: needs.scope.outputs.source == 'true' && needs.scope.outputs.mode == 'node'
         working-directory: ${{ github.repository_id == '1440689456' && 'target/candidate' || 'target' }}
@@ -192,6 +206,20 @@ jobs:
           printf 'WORKFLOW_REPOSITORY=%s\nWORKFLOW_SHA=%s\nWORKFLOW_PATH=%s\n' "$WORKFLOW_REPOSITORY" "$WORKFLOW_SHA" "$WORKFLOW_PATH" >> "$GITHUB_ENV"
       - name: Verify source identity
         run: node policy/scripts/validation-input.mjs
+      - name: Verify isolated executable controller and SDK runtime
+        if: github.repository_id == '1440689456'
+        working-directory: target
+        shell: bash
+        run: |
+          node --input-type=module -e 'import {realpathSync} from "node:fs"; import {realpath} from "node:fs/promises"; import {tmpdir} from "node:os"; console.log(JSON.stringify({temp:tmpdir(),sync:realpathSync(tmpdir()),native:realpathSync.native(tmpdir()),async:await realpath(tmpdir())}));'
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx --no-install vitest run packages/runner/test/governance-promotion.test.ts
+          npm run typecheck
+          npm run verify:config
+          npm run verify:dist
+          npm ci --prefix tools/quality-language --ignore-scripts --no-audit --no-fund
+          npm test --prefix tools/quality-language
+          npm run verify:runtime --prefix tools/quality-language
       - name: Node tests and configuration
         if: needs.scope.outputs.source == 'true' && needs.scope.outputs.mode == 'node'
         working-directory: ${{ github.repository_id == '1440689456' && 'target/candidate' || 'target' }}

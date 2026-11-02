@@ -8,6 +8,13 @@ const source:QualitySource={sourceCommentId:'review-comment:10',sourceCommit:'a'
 const context={repositoryId:12,pullRequestNumber:1,head:'a'.repeat(40),configVersion:'v1',observedAt:'2026-10-28T01:00:00Z'};
 const translation=(s:any)=>{const {bodyMarkdown,...fields}=s;return {...fields,problemZh:'处理调用失败的问题。',impactZh:'调用可能失败。',suggestionZh:'先验证输入。'};};
 
+it('retains identifier order and handles long delimiter runs without retrying suffixes',()=>{
+  const prepared=prepareQualitySource({...source,bodyMarkdown:'Check ``src/ERROR_CODE.ts`` and API_KEY before a//b/c and FOO-BAR. '+ '-'.repeat(4000)});
+  expect(prepared.segments[0]!.originalIdentifiers).toEqual(['src/ERROR_CODE.ts','API_KEY','b/c','FOO-BAR']);
+  const delimiters=prepareQualitySource({...source,bodyMarkdown:'Check '+ '`'.repeat(4000)+' remaining text.'});
+  expect(delimiters.segments.flatMap(s=>s.originalIdentifiers)).toEqual([]);
+});
+
 it('preserves nested and top-level code/log bytes while splitting prose by code point',()=>{
   const code='```text\r\nTOKEN /path/test\r\n```',prepared=prepareQualitySource({...source,bodyMarkdown:'English finding.\n\n'+code+'\n\n'+('Check emoji 🧪. '.repeat(1500))+'\n\n> ```js\n> hello();\n> ```'});
   expect(prepared.preservedBlocks[0]).toBe(code);expect(prepared.preservedBlocks).toHaveLength(2);
