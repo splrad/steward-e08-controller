@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import YAML from 'yaml';
 import { collectQualitySources, publishQualityCheck, serviceQualityPullRequest, translateQualitySources, qualityPages, type QualityContext, type QualityIO } from '../src/quality-language-summary.js';
 import { reconcileQualitySources, renderQualitySummary, type QualityCache, type QualitySource } from '../../core/src/quality-language-summary.js';
+import { decodeStateFile } from '../../core/src/release-observation.js';
 
 const context:QualityContext={repository:'test/product',repositoryId:12,pullRequestNumber:1,head:'a'.repeat(40),appId:4243096,configVersion:'quality-v1'};
 const identities=[{kind:'review-comment' as const,id:50,login:'quality[bot]'},{kind:'review' as const,id:50,login:'quality[bot]'},{kind:'annotation' as const,id:60,login:'quality'}];
@@ -25,7 +26,7 @@ function fixture() {
     else if(url.pathname.endsWith('/check-runs'))value={total_count:checks.length,check_runs:checks};else throw Error(path);
     return {value:structuredClone(value),headers:new Headers()};},async writeCheck(body,id){writes.push({body,id});const value={id:id??101,app:{id:context.appId},...body};
       checks=checks.filter(c=>c.id!==value.id).concat(value);if(loseWrite)throw Error('lost');return value;}};
-  const store={async save(cache:QualityCache,markdown?:any){saves.push(structuredClone(cache));if(markdown)files.push(markdown);return {commit:'c'.repeat(40)};}};
+  const store={async save(cache:QualityCache,markdown?:any){saves.push(decodeStateFile('steward/governance-state','quality/1.json',Buffer.from(JSON.stringify(cache)),12) as QualityCache);if(markdown)files.push(markdown);return {commit:'c'.repeat(40)};}};
   const client={async preflight(){return {status:'READY' as const};},async call(segments:any[]){calls++;return {items:segments.map(translate),model:'fixture',usage:null};}};
   return {io,store,client,requests,writes,saves,files,get calls(){return calls;},get comments(){return comments;},set comments(v){comments=v;},get checks(){return checks;},set checks(v){checks=v;},
     set annotations(v:any[]){annotations=v;},set head(v:string){head=v;},set failRead(v:boolean){failRead=v;},set loseWrite(v:boolean){loseWrite=v;}};

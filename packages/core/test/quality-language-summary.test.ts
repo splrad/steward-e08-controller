@@ -60,10 +60,31 @@ it('retains original finding until every segment succeeds and keeps original com
   const final=renderQualitySummary(cache);expect(final.complete).toBe(1);expect(final.markdown).toContain('```log\nEXACT $text\n```');expect(final.markdown).toContain(source.sourceCommit);
 });
 it('strict quality schema joins the existing governance writer, preserving raw code line endings',async()=>{
-  const cache=await reconcileQualitySources(null,context,[source]);
+  const bodyMarkdown='Check `src/foo.ts`.\r\n\r\n```text\r\n\tEXACT log\r\n```\r\n\r\nThe input fails. 🧪';
+  const cache=await reconcileQualitySources(null,context,[{...source,bodyMarkdown}]);
+  for(const entry of Object.values(cache.entries))entry.result={...translation(entry.segment),problemZh:'输入处理失败。\n请保留原始日志。'};
   expect(decodeStateFile('steward/governance-state','quality/1.json',Buffer.from(JSON.stringify(cache)),12)).toEqual(cache);
   expect(decodeStateFile('steward/governance-state',`quality/1/${context.head}.md`,Buffer.from('```\r\ncode\r\n```'),12)).toBe('```\r\ncode\r\n```');
   expect(()=>decodeStateFile('steward/governance-state','quality/2.json',Buffer.from(JSON.stringify(cache)),12)).toThrow();
   expect(()=>stateRecordOwner('steward/release-state','quality/1.json')).toThrow();
   expect(()=>decodeQualityCache({...cache,commands:['do anything']},12,1)).toThrow(/SCHEMA/);
+});
+it.each(['configVersion','severity','sourceUrl','model'])('quality text handling keeps %s metadata strict',async field=>{
+  const cache=await reconcileQualitySources(null,context,[source]),entry=Object.values(cache.entries)[0]!;
+  if(field==='configVersion')cache.configVersion+='\n';
+  else if(field==='severity')cache.heads[context.head]!.sources[0]!.severity+='\n';
+  else if(field==='sourceUrl')entry.segment.sourceUrl+='\n';
+  else entry.attempts.push({startedAt:context.observedAt,status:'UNKNOWN',model:'model\nname',usage:null});
+  expect(()=>decodeStateFile('steward/governance-state','quality/1.json',Buffer.from(JSON.stringify(cache)),12)).toThrow('RN_BUILD_INVALID');
+});
+it.each(['duplicate','utf8','bom','size','surrogate','nonfinite'])('quality text handling rejects malformed %s JSON',async kind=>{
+  const cache=await reconcileQualitySources(null,context,[source]);let text=JSON.stringify(cache);
+  if(kind==='duplicate')text=text.replace('"bodyMarkdown":','"bodyMarkdown":"first","bodyMarkdown":');
+  if(kind==='bom')text='\ufeff'+text;
+  if(kind==='size')text+=' '.repeat(512*1024);
+  if(kind==='surrogate'){cache.heads[context.head]!.sources[0]!.bodyMarkdown='bad\ud800';text=JSON.stringify(cache);}
+  if(kind==='nonfinite')text=text.replace('"cursor":0','"cursor":1e999');
+  const bytes=kind==='utf8'?Buffer.from([0xff]):Buffer.from(text);
+  const error=kind==='utf8'?TypeError:kind==='bom'?'RELEASE_OBSERVATION: state UTF-8 LF':kind==='size'?'RELEASE_OBSERVATION: state file bound':'RN_BUILD_INVALID';
+  expect(()=>decodeStateFile('steward/governance-state','quality/1.json',bytes,12)).toThrow(error);
 });
