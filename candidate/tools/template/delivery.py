@@ -305,8 +305,13 @@ def deliver(request, api, central_api, *, read_token=None, renderer=copier.rende
                 require('\0' not in content, 'GENERATED_BINARY')
                 del entry['sha']; entry['content'] = content
             changes.append(entry)
-        created = api.request('POST', prefix + '/git/trees', {'base_tree':base_tree,'tree':changes})
-        require(created['sha'] == tree, 'TREE_MISMATCH')
+        # An adopted base can need a merge commit with no file changes. GitHub
+        # rejects an empty tree update; the existing base tree already has the bytes.
+        if changes:
+            created = api.request('POST', prefix + '/git/trees', {'base_tree':base_tree,'tree':changes})
+            require(created['sha'] == tree, 'TREE_MISMATCH')
+        else:
+            require(base_tree == tree, 'TREE_MISMATCH')
         parents = list(dict.fromkeys(([head] if head else []) + [base]))
         message = ('chore: update common repository template\n\n' + signoff + '\n'
                    + f"Steward-Sync-Run: {CENTRAL_ID}/{request['runId']}\n"

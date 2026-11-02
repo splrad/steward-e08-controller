@@ -91,6 +91,8 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           uv sync --project tools/template --frozen --no-dev
+      - name: Run Copier delivery regressions
+        run: uv run --project tools/template --frozen --no-sync python -m unittest discover -s tools/template -p test_delivery.py -v
       - name: Execute native templates consumer and replay
         env:
           GITHUB_TOKEN: ${{ github.token }}

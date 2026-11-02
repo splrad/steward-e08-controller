@@ -161,9 +161,14 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(self.run_delivery()['status'],'CLOSED');self.assertEqual(len(self.api.mutations),before)
         self.api.prs[0]['merged_at']='2026-10-28T00:00:00Z'
         self.git(self.remote,'update-ref','refs/heads/develop',first['head'])
-        self.edit('develop','after-merge.txt','new base\n')
+        base=self.edit('develop','after-merge.txt','new base\n');before=len(self.api.mutations)
         self.assertEqual(self.run_delivery()['status'],'NO_DIFF');self.assertEqual(self.api.creates,1)
         self.git(self.remote,'merge-base','--is-ancestor',first['head'],self.head())
+        self.assertEqual(self.git(self.remote,'rev-parse',self.head()+'^{tree}'),self.git(self.remote,'rev-parse',base+'^{tree}'))
+        self.assertEqual(self.git(self.remote,'show','-s','--format=%P',self.head()).split(),[first['head'],base])
+        self.assertFalse(any(path.endswith('/git/trees') for _,path,_ in self.api.mutations[before:]))
+        before=len(self.api.mutations)
+        self.assertEqual(self.run_delivery()['status'],'NO_DIFF');self.assertEqual(len(self.api.mutations),before)
 
     def test_unverified_signature_or_wrong_tree_never_moves_ref(self):
         for failure in ['signature','tree','parents','identity','message']:
@@ -280,6 +285,7 @@ class FixtureAPI:
             query=parse_qs(urlparse(path).query);assert query['state']==['all'] and query['head']==['splrad:'+BRANCH] and query['base']==['develop']
             return copy.deepcopy(self.prs)
         if method=='POST' and route.endswith('/git/trees'):
+            if not body['tree']:raise NativeFailure('SYNC_GH_HTTP_422')
             with tempfile.TemporaryDirectory(prefix='tree-',dir=t.root) as temp:
                 env={**os.environ,'GIT_INDEX_FILE':str(Path(temp)/'index'),'GIT_WORK_TREE':str(temp)}
                 def git(*args,input=None):return subprocess.check_output(['git',*args],cwd=t.remote,env=env,input=input).decode().strip()
