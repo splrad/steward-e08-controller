@@ -73,4 +73,3 @@ export async function observeCopilotReviewCommand(args: Readonly<Record<string, 
   await summary([JSON.stringify({ repository: repository.full_name, number, ...state })]);
   await output({ state: state.state, reason: state.reason, headSha });
 }
-

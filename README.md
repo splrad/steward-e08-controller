@@ -59,7 +59,7 @@ node packages/runner/dist/index.js observe-copilot-review --repository-id REPOSI
 
 命令使用调用方提供的只读 `GITHUB_TOKEN`，通过官方 Octokit 读取组织内未归档、未禁用仓库的开放 PR。读取前后核对仓库 ID、组织 ID、默认分支和当前 head；输出 JSON 状态及 `state`、`reason`、`headSha`。它保留 fork 日志归属、完整分页、状态漂移和下载令牌隔离检查。
 
-默认分支的 [Native Review](.github/workflows/native-review.yml) 只接受手动调用，输入为 `repositoryId`、`pullRequestNumber`、`eventAfterSha`。该工作流使用原生只读 token；工作流成功表示完成读取，审查结论以返回的 `state` 为准。
+默认分支的 [Native Review](candidate/.github/workflows/native-review.yml) 只接受手动调用，输入为 `repositoryId`、`pullRequestNumber`、`eventAfterSha`。该工作流使用原生只读 token；工作流成功表示完成读取，审查结论以返回的 `state` 为准。
 
 发布说明从固定 Git 来源、已审单位文稿和冻结贡献者事实生成，采用同一份[正式发布模板](docs/release-notes.md)。协调器还观察五个固定中央工作流，按准确原 Run 执行[有限维护恢复](docs/maintenance.md)。
 

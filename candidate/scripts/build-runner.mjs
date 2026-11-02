@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 
@@ -15,4 +15,10 @@ try {
   if (code !== 0) process.exit(code ?? 1);
   // Release Please reads its packaged Handlebars templates at runtime. Keep all
   // ncc assets and verify their bytes alongside index.js.
+  for (const name of await readdir("packages/runner/dist")) {
+    if (!name.endsWith(".hbs")) continue;
+    const path = join("packages/runner/dist", name);
+    const text = (await readFile(path, "utf8")).trimEnd();
+    await writeFile(path, text ? text + "\n" : "");
+  }
 } finally { await rm(compiled, { recursive: true, force: true }); }
