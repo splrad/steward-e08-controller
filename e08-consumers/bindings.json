@@ -49,10 +49,12 @@
   ],
   "priorMergedSha": "8fade180cff5587156809ff577739be8eae10d7e",
   "runtimeSha256": "5163170cda325e49871ee1ed04d0beab80c7fb7dab3e42827ee1610666dff751",
-  "sourceManifestSha256": "5d5212935e3cde2dd8b1c7dbd3698b401fd5a6f455205fac6f612826f6d6d694",
+  "sourceManifestSha256": "844e06f24d404ac61b6c28e85f37212bf3f7d493762b99b724eeceef98698c74",
   "sourceCorrections": {
     "scripts/repository-bootstrap.mjs": "26d397eb98ad5a310808c034c7d5244707e5323ce836fed9bcf45540bbd8ddc5",
-    "scripts/settings-sync.mjs": "b87683c6c8fe264806578301b8091fab19b49a9bf3fd5f4615ee27043b4778b2",
-    "packages/runner/test/bootstrap-wiring.test.ts": "80a11fab0c43456b04ed65a2c12f8eb0fc742073d1f4531978931df406928c30"
+    "scripts/settings-sync.mjs": "5eb5294520df770dfa1ee2f55372aa468514305128c10e021235c65b199e3906",
+    "packages/runner/test/bootstrap-wiring.test.ts": "80a11fab0c43456b04ed65a2c12f8eb0fc742073d1f4531978931df406928c30",
+    "tools/settings-sync/governance-identity.mjs": "a370760cb09e2aa3069c9c1838732effb330c0fc7cd14e8aa2e85b5b97d378f9",
+    "packages/runner/test/settings-sync.test.ts": "badb267a550d40e7402f58417142735293b50aa9df0be396b103b2ceb946fd76"
   }
 }
