@@ -222,7 +222,22 @@ export function decodeStateFile(targetRef: string, path: string, bytes: Uint8Arr
   if(owner==='settings') return decodeSettingsReport(decodeBuildJson(bytes),repositoryId,path);
   if(owner==='maintenance') return decodeMaintenanceRecord(bytes,repositoryId,path);
   if(owner==='pages') return decodePagesMaintenance(bytes,repositoryId,path);
-  if(owner==='quality') return decodeQualityCache(decodeBuildJson(bytes), repositoryId, Number(path.split('/')[1]!.replace('.json','')));
+  if(owner==='quality') {
+    // Source Markdown, identifiers and translations are content. Validate the
+    // complete JSON envelope first, then keep strict checks on its metadata.
+    const value=decodeQualityCache(decodeBuildJson(bytes,'oci'),repositoryId,Number(path.split('/')[1]!.replace('.json','')));
+    const metadata=structuredClone(value);
+    for(const head of Object.values(metadata.heads))for(const source of head.sources)source.bodyMarkdown='content';
+    for(const entry of Object.values(metadata.entries)) {
+      entry.segment.bodyMarkdown='content';entry.segment.originalIdentifiers=[];
+      if(entry.result) {
+        entry.result.originalIdentifiers=[];
+        entry.result.problemZh=entry.result.impactZh=entry.result.suggestionZh='content';
+      }
+    }
+    decodeBuildJson(new TextEncoder().encode(JSON.stringify(metadata)));
+    return value;
+  }
   if(owner!=='health' && owner!=='bootstrap') return fail('owner schema connection pending');
   const value=decodeBuildJson(bytes) as Record<string, any>;
   if(!validators[owner]!(value)) return fail(`invalid ${owner} record`);
