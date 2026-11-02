@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-import { createAppAuth } from '@octokit/auth-app';
+import { settingsGovernanceIdentity } from '../tools/settings-sync/governance-identity.mjs';
 import { Octokit } from '@octokit/rest';
 import { parse } from 'yaml';
 import { isolatedBuildEnvironment } from '../packages/runner/dist/index.js';
@@ -75,14 +75,7 @@ export async function main() {
   const git = async (...args) => (await promisify(execFile)('git',['--no-replace-objects','-C',upstream,...args],{windowsHide:true})).stdout.trim();
   check(await git('rev-parse','HEAD') === upstreamSha && await git('status','--porcelain','--untracked-files=no') === '', 'SETTINGS_UPSTREAM_CHANGED');
   const log = {debug(){},info(){},warn(){},error(){}};
-  const app = new Octokit({authStrategy:createAppAuth,auth:{appId:governanceAppId,privateKey:env.PRIVATE_KEY},log,
-    request:{headers:{'x-github-api-version':'2026-03-10'}}});
-  app.hook.before('request',options=>{options.headers['x-github-api-version']='2026-03-10';});
-  const fact=(await app.request('GET /app')).data, installation=(await app.request('GET /orgs/splrad/installation')).data;
-  check(fact.id===governanceAppId && installation.app_id===governanceAppId && installation.account?.id===302208797 && !installation.suspended_at,'SETTINGS_APP_IDENTITY');
-  const bot=(await app.request('GET /users/{username}',{username:fact.slug+'[bot]'})).data;
-  check(bot.type==='Bot' && Number.isSafeInteger(bot.id),'SETTINGS_BOT_IDENTITY');
-  const identity={name:bot.login,email:`${bot.id}+${bot.login}@users.noreply.github.com`};
+  const {app,installation,identity}=await settingsGovernanceIdentity(governanceAppId,env.PRIVATE_KEY);
   const root=await mkdtemp(join(tmpdir(),'steward-settings-')),profile=await mkdtemp(join(root,'profile-')),output=join(root,'result.json');
   const raw=await open(join(root,'upstream.log'),'wx',0o600);
   let code;

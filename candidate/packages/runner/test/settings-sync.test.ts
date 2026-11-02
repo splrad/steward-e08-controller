@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash,generateKeyPairSync } from 'node:crypto';
 import YAML from 'yaml';
 import { reconcileQualitySources } from '../../core/src/quality-language-summary.js';
 import { decodeStateFile } from '../../core/src/release-observation.js';
@@ -16,6 +16,22 @@ const report = () => ({ schemaVersion: 1, repositoryId: 12, repository: 'splrad/
   controllerSha: 'a'.repeat(40), upstreamSha: 'b'.repeat(40), observedAt: '2026-10-28T00:00:00.000Z', mode: 'NOP', status: 'success',
   entries: [{kind:'result',value:JSON.stringify({repo:'fixture',plugin:'Labels',action:{additions:[{name:'auto/docs'}]}})}] });
 const decode = (value:unknown,path='settings/21-2.json',id=12) => decodeStateFile('steward/governance-state',path,Buffer.from(JSON.stringify(value)+'\n'),id);
+it('actual settings identity keeps App queries authenticated and public bot lookup anonymous',async()=>{
+  const {settingsGovernanceIdentity}=await import(pathToFileURL(resolve('tools/settings-sync/governance-identity.mjs')).href);
+  const {privateKey}=generateKeyPairSync('rsa',{modulusLength:2048}),calls:string[]=[];
+  const transport=async(input:any,init:any)=>{
+    const path=decodeURIComponent(new URL(String(input)).pathname),headers=new Headers(init.headers);calls.push(path);
+    expect(headers.get('x-github-api-version')).toBe('2026-03-10');let value:any;
+    if(path==='/app'){expect(headers.get('authorization')).toMatch(/^bearer /i);value={id:88,slug:'fixture-governance'};}
+    else if(path==='/orgs/splrad/installation'){expect(headers.get('authorization')).toMatch(/^bearer /i);value={id:8,app_id:88,account:{id:302208797},suspended_at:null};}
+    else if(path==='/users/fixture-governance[bot]'){expect(headers.has('authorization')).toBe(false);value={type:'Bot',id:33,login:'fixture-governance[bot]'};}
+    else throw Error('UNEXPECTED_IDENTITY_ENDPOINT');
+    return new Response(JSON.stringify(value),{status:200,headers:{'content-type':'application/json'}});
+  };
+  const result=await settingsGovernanceIdentity(88,privateKey.export({type:'pkcs8',format:'pem'}).toString(),transport);
+  expect(result.identity).toEqual({name:'fixture-governance[bot]',email:'33+fixture-governance[bot]@users.noreply.github.com'});
+  expect(calls).toEqual(['/app','/orgs/splrad/installation','/users/fixture-governance[bot]']);
+});
 it('settings evidence binds native repository/run/attempt and rejects another repository detail', () => {
   expect(decode(report())).toEqual(report());
   for (const value of [{...report(),repositoryId:13},{...report(),extra:true},{...report(),entries:[{kind:'error',value:'{}'}]},

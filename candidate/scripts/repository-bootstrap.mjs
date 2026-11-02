@@ -107,19 +107,24 @@ export async function bootstrapWake({discover,service}) {
   return counts;
 }
 
-export async function main() {
+export async function main(transport=fetch) {
+  const nativeTransport=(input,init)=>{
+    const headers=new Headers(init?.headers);headers.set('X-GitHub-Api-Version','2026-03-10');
+    return transport(input,{...init,headers});
+  };
   const env=process.env,appId=Number(env.GOVERNANCE_APP_ID);
   check(env.GITHUB_REPOSITORY==='splrad/steward'&&env.GITHUB_REPOSITORY_ID==='1296724484'&&env.GITHUB_REF===`refs/heads/${env.STEWARD_DEFAULT_BRANCH}`
     &&['push','schedule','workflow_dispatch'].includes(env.GITHUB_EVENT_NAME)&&/^[a-f0-9]{40}$/.test(env.STEWARD_CONTROLLER_SHA??'')&&positive(appId)&&appId!==4243096,'CENTRAL_IDENTITY');
   const config=JSON.parse(await readFile('config/governance/bootstrap.json','utf8'));
   check(config.schemaVersion===1&&Object.keys(config).sort().join(',')==='rules,schemaVersion'&&Array.isArray(config.rules),'CONFIG');
-  const app=new Octokit({authStrategy:createAppAuth,auth:{appId,privateKey:env.GOVERNANCE_APP_PRIVATE_KEY},log,request:{headers:{'x-github-api-version':'2026-03-10'}}});
+  const app=new Octokit({authStrategy:createAppAuth,auth:{appId,privateKey:env.GOVERNANCE_APP_PRIVATE_KEY},log,request:{fetch:nativeTransport}});
   app.hook.before('request',options=>{options.headers['x-github-api-version']='2026-03-10';});
   const fact=(await app.request('GET /app')).data,installation=(await app.request('GET /orgs/splrad/installation')).data;
   check(fact.id===appId&&installation.app_id===appId&&installation.account?.id===302208797&&!installation.suspended_at,'GOVERNANCE_APP');
-  const bot=(await app.request('GET /users/{username}',{username:fact.slug+'[bot]'})).data;check(bot.type==='Bot'&&positive(bot.id),'BOT');
+  const publicReader=new Octokit({log,request:{fetch:nativeTransport}});
+  const bot=(await publicReader.request('GET /users/{username}',{username:fact.slug+'[bot]'})).data;check(bot.type==='Bot'&&positive(bot.id),'BOT');
   const identity={name:bot.login,email:`${bot.id}+${bot.login}@users.noreply.github.com`,id:bot.id};
-  const central=bootstrapNativeIO(env.GITHUB_TOKEN),controller=await get(central,`/repos/splrad/steward/actions/runs/${env.GITHUB_RUN_ID}`);
+  const central=bootstrapNativeIO(env.GITHUB_TOKEN,transport),controller=await get(central,`/repos/splrad/steward/actions/runs/${env.GITHUB_RUN_ID}`);
   const source={workflowId:controller.workflow_id,runId:Number(env.GITHUB_RUN_ID),runAttempt:Number(env.GITHUB_RUN_ATTEMPT),controllerSha:env.STEWARD_CONTROLLER_SHA};
   const verifySource=async s=>{
     const run=await get(central,`/repos/splrad/steward/actions/runs/${s.runId}`),workflow=await get(central,`/repos/splrad/steward/actions/workflows/${s.workflowId}`);
@@ -130,7 +135,7 @@ export async function main() {
   };
   const credential=async(repositoryId,permissions)=>{
     const value=await app.auth({type:'installation',installationId:installation.id,refresh:true,permissions,...(repositoryId?{repositoryIds:[repositoryId]}:{})});
-    const io=bootstrapNativeIO(value.token);return {token:value.token,io,revoke:async()=>{const r=await io.request('DELETE','/installation/token');check(r.status===204,'TOKEN_REVOKE');}};
+    const io=bootstrapNativeIO(value.token,transport);return {token:value.token,io,revoke:async()=>{const r=await io.request('DELETE','/installation/token');check(r.status===204,'TOKEN_REVOKE');}};
   };
   const root=await mkdtemp(join(tmpdir(),'steward-bootstrap-'));
   const counts=await bootstrapWake({discover:async()=>{
@@ -155,5 +160,6 @@ export async function main() {
   }});
   const summary=JSON.stringify(counts)+'\n';process.stdout.write(summary);if(env.GITHUB_STEP_SUMMARY)await appendFile(env.GITHUB_STEP_SUMMARY,summary);
   if(counts.failed)process.exitCode=1;
+  return counts;
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)main().catch(()=>{process.stderr.write('BOOTSTRAP_UNAVAILABLE\n');process.exitCode=1;});
