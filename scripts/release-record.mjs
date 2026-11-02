@@ -125,7 +125,7 @@ export async function readReleaseRecords({ directory, targetRef, repositoryId })
           }
           history.push({commit,path,blobSha:oid,status:'DECODED'});
         } catch(error) {
-          if(error instanceof Error&&/^RELEASE_RECORD:/.test(error.message))throw error;
+          if ((error instanceof Error) && /^RELEASE_RECORD:/.test(error.message)) throw error;
           history.push({commit,path,blobSha:oid,status:'INVALID_RECORD'});
         }
       }

@@ -241,11 +241,14 @@ export async function nativeOrasRead(args:readonly string[]):Promise<string> {
 export async function readDirectChannelTargets(context:EvidenceContext,targets:ChannelTarget[],io:EvidenceTransport,now:string,oras:OrasRead=nativeOrasRead,history:ChannelRecord[]=[]) {
   const reader=new NativeEvidenceReader(io,context.repository);let source:any,legacy:ReturnType<typeof verifyNormalizedDelivery>|undefined;
   try {source=await reader.json(`contents/.github/delivery.json?ref=${context.cycle.sourceSha}`);}catch(error) {
-    if(error instanceof EvidenceReadError&&error.status===404) {
+    if ((error instanceof EvidenceReadError) && error.status === 404) {
       const records=history.filter(r=>r.path.startsWith('evidence/normalized-delivery/')&&r.value.cycleId===context.cycle.id);
       if(records.length)legacy=verifyNormalizedDelivery(context,records[0]!);
     }
-    if(!legacy) {if(error instanceof EvidenceReadError&&[401,403,404].includes(error.status))return {files:[] as ArchiveFile[],reads:[] as ChannelReadItem[]};throw error;}
+    if (!legacy) {
+      if ((error instanceof EvidenceReadError) && [401,403,404].includes(error.status)) return {files:[] as ArchiveFile[],reads:[] as ChannelReadItem[]};
+      throw error;
+    }
   }
   const bytes=legacy?Buffer.from(JSON.stringify(legacy)):Buffer.from(source.content??'','base64');
   if(!legacy&&(source.type!=='file'||source.encoding!=='base64'||source.size!==bytes.length||source.sha!==context.cycle.deliveryConfigSha
@@ -704,7 +707,7 @@ export async function observeNativeChannels(context:EvidenceContext,history:Chan
     catch(error) {
       // An archived successful observation remains evidence, never a new execution or reset of failures.
       const prior=history.filter(record=>record.value.kind==='RESULT'&&record.value.run.id===request.canonicalRunId).sort((a,b)=>b.value.run.runAttempt-a.value.run.runAttempt)[0];
-      if(!(error instanceof EvidenceReadError&&[404,410].includes(error.status))||!prior)throw error;
+      if (!((error instanceof EvidenceReadError) && [404,410].includes(error.status)) || !prior) throw error;
       // An authorized, complete inventory distinguishes deletion from an inaccessible Run.
       const inventory=await reader.pages(`actions/workflows/${request.workflowId}/runs`,'workflow_runs');
       if(inventory.some(value=>value.id===request.canonicalRunId))throw error;
