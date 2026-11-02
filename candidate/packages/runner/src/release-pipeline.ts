@@ -98,7 +98,7 @@ export async function readCycleDelivery(context:EvidenceContext,records:{path:st
       ||createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex')!==source.sha)fail('original delivery evidence required');
     return {delivery:parseDeliveryConfig(JSON.parse(bytes.toString('utf8'))),legacy:null};
   }catch(error) {
-    if(!(error instanceof EvidenceReadError&&error.status===404))throw error;
+    if (!((error instanceof EvidenceReadError) && error.status === 404)) throw error;
     const proofs=records.filter(r=>r.path.startsWith('evidence/normalized-delivery/')&&(r.value as {cycleId?:string})?.cycleId===context.cycle.id).map(r=>verifyNormalizedDelivery(context,r));
     if(!proofs.length)fail('NORMALIZED_DELIVERY_EVIDENCE_REQUIRED');
     if(proofs.some(proof=>JSON.stringify({...proof,observedAt:''})!==JSON.stringify({...proofs[0],observedAt:''})))fail('conflicting normalized delivery evidence');
@@ -135,7 +135,6 @@ export async function pipelineChannelIdentity(inputs:ProductChannelInputs,state:
   const cycle=parseReleaseRecord('cycle',state.cycles.find(value=>value.value.id===inputs.cycle_id)?.value), repository=parseReleaseRecord('repository',state.repository);
   const reader=new NativeEvidenceReader(io,fullName),actual=await reader.json(''),bot=JSON.parse(await gh(['api','users/splrad-steward%5Bbot%5D']));
   const stateRef=async()=> (await reader.json('git/ref/heads/steward/release-state')).object?.sha===state.head;
-  if(!await stateRef())return {status:'UNKNOWN' as const,reason:'STATE_SOURCE_MOVED'};
   if(repository.repositoryId!==repositoryId||actual.id!==repositoryId||actual.full_name!==fullName||actual.archived!==false||actual.disabled!==false
     ||actual.default_branch!==repository.defaultBranch||inputs.source_sha!==cycle.sourceSha||inputs.controller_sha!==cycle.controllerSha
     ||environment.GITHUB_EVENT_NAME!=='workflow_dispatch'||environment.GITHUB_REF!==`refs/heads/${actual.default_branch}`
@@ -145,6 +144,7 @@ export async function pipelineChannelIdentity(inputs:ProductChannelInputs,state:
   if(run.repositoryId!==repositoryId||run.headRepositoryId!==repositoryId||run.path!=='.github/workflows/steward-release-channels.yml'
     ||run.headBranch!==actual.default_branch||run.event!=='workflow_dispatch'||run.runAttempt!==attempt||run.actorId!==bot.id||run.triggeringActorId!==bot.id)fail('channel native execution');
   if(run.headSha!==inputs.execution_sha||environment.GITHUB_SHA!==inputs.execution_sha)return {status:'REJECTED' as const,reason:'SOURCE_REF_MOVED'};
+  if(!await stateRef())return {status:'UNKNOWN' as const,reason:'STATE_SOURCE_MOVED'};
   const {delivery}=await readCycleDelivery(context,state.domainRecords,io);
   for(const target of targets)if(!delivery.units.some(unit=>unit.id===target.unitId&&unit.channels.some(channel=>channel.id===target.channelId)))fail('undeclared channel');
   const digest=channelTargetsDigest(context,targets);

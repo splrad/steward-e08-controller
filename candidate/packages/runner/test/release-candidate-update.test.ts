@@ -147,6 +147,17 @@ it('a large same-PR preview links the exact archive commit and changes only the 
   const own = f.comments.find(c => c.authorId === 42)!; expect(Buffer.byteLength(own.body)).toBeLessThanOrEqual(48 * 1024);
   expect(own.body).toContain(`/blob/${'f'.repeat(40)}/generated/${digest}/preview.md`); expect(f.pr.body).toBe('Human metadata');
 });
+it('adopts the verified human notes head and clears an earlier conflict when no tree write is needed', async () => {
+  const f = await controllerFixture(), N = structuredClone(f.session.generated!);
+  const reviewed = f.notes.replace('原来概述', '人工审核概述').replace(/\n/g, '\r\n');
+  const human = await f.commit('.release-notes/app.md', reviewed);
+  f.pr.head = human; f.session.conflict = { head: f.B, generated: N, paths: ['code.txt'] };
+  expect(await advanceReleaseCandidate(f.session, f.io)).toMatchObject({ status: 'READY', prNumber: 9, head: human });
+  expect(f.session.repository.candidate!.publishedHead).toBe(human); expect(f.session.conflict).toBeNull();
+  expect(f.session.generated).toEqual(N); expect(f.pushes()).toBe(0); expect(f.pr.body).toBe('Human metadata');
+  expect(f.session.preview).toContain('人工审核概述'); expect(f.session.preview).not.toContain('\r');
+  expect(await f.git('show', `${human}:.release-notes/app.md`)).toBe(reviewed.trim());
+});
 it('an unaccepted pending write is archived before acknowledging editing, with no deadlock or push', async () => {
   const f = await controllerFixture(), N = f.snapshot(f.B, f.notes.replace('原来内容', '自动内容'));
   const prepared = await prepareCandidateWrite(f.repo, f.B, N, await mergeCandidate(f.repo, f.snapshot(), f.B, N, f.root), identity, f.root);

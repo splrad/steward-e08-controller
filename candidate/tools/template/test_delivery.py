@@ -166,10 +166,10 @@ class DeliveryTests(unittest.TestCase):
         self.git(self.remote,'merge-base','--is-ancestor',first['head'],self.head())
 
     def test_unverified_signature_or_wrong_tree_never_moves_ref(self):
-        for failure in ['signature','tree','parents','identity']:
+        for failure in ['signature','tree','parents','identity','message']:
             with self.subTest(failure=failure):
                 self.api.invalid=failure
-                with self.assertRaisesRegex(ValueError,'SYNC_(SIGNATURE|TREE_MISMATCH|SIGNED_PARENTS)'):self.run_delivery()
+                with self.assertRaisesRegex(ValueError,'SYNC_(SIGNATURE|TREE_MISMATCH|SIGNED_PARENTS|SIGNED_MESSAGE)'):self.run_delivery()
                 self.assertIsNone(self.head());self.assertEqual(self.api.creates,0)
 
     def test_unknown_branch_and_foreign_run_provenance_are_rejected(self):
@@ -300,7 +300,8 @@ class FixtureAPI:
             if self.lose_commit:raise NativeFailure('response lost')
             return {'sha':sha}
         if '/git/commits/' in route:
-            sha=route.rsplit('/',1)[1];message=subprocess.check_output(['git','show','-s','--format=%B',sha],cwd=t.remote).decode().rstrip('\n')+'\n'
+            sha=route.rsplit('/',1)[1];message=subprocess.check_output(['git','show','-s','--format=%B',sha],cwd=t.remote).decode().rstrip('\n')
+            if self.invalid=='message':message='unexpected title\n'+message.split('\n',1)[1]
             parents=t.git(t.remote,'show','-s','--format=%P',sha).split()
             return {'sha':sha,'message':message,'tree':{'sha':t.git(t.remote,'rev-parse',sha+'^{tree}')},
                     'parents':[{'sha':p} for p in (parents[::-1]+['a'*40] if self.invalid=='parents' else parents)],

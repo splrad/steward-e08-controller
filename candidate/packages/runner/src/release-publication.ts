@@ -62,9 +62,13 @@ async function objects(context:EvidenceContext,io:EvidenceTransport):Promise<Nat
       proof.digest=hash(JSON.stringify([stableReleaseFacts(release),bytes.sort((a,b)=>Number(a[0])-Number(b[0]))]));
       proof.status=release.draft===false&&release.immutable===true&&assets.length===unit.assets.length?'MATCH':'ABSENT';
     }catch(error) {
-      if(error instanceof EvidenceReadError&&error.status===404) {
-        try {const all=await reader.pages('releases','');if(!all.some(r=>r.tag_name===unit.tag||r.id===unit.releaseId))proof.status=unit.releaseId===null?'ABSENT':'CONFLICT';}catch{ /* Incomplete visibility is unknown. */ }
-      }else if(error instanceof Error&&error.message.startsWith('NATIVE_PUBLICATION:'))proof.status='CONFLICT';
+      if (error instanceof EvidenceReadError && error.status === 404) {
+        try {
+          const all = await reader.pages('releases','');
+          if (!all.some(r => r.tag_name === unit.tag || r.id === unit.releaseId))
+            proof.status = unit.releaseId === null ? 'ABSENT' : 'CONFLICT';
+        } catch { /* Incomplete visibility is unknown. */ }
+      } else if (error instanceof Error && error.message.startsWith('NATIVE_PUBLICATION:')) proof.status = 'CONFLICT';
     }
     result.push(proof);
   }
@@ -92,8 +96,8 @@ export async function inspectPublications(context:EvidenceContext,history:Public
         check(same(latest,nativeRunFact(await reader.json(`actions/runs/${id}`))),'central Run changed');
       }catch(error) {
         const prior=records.filter(r=>r.value.centralRun.id===id&&r.value.attempts.length).sort((a,b)=>b.value.observedAt.localeCompare(a.value.observedAt))[0];
-        let expired=error instanceof EvidenceReadError&&error.status===410;
-        if(prior&&error instanceof EvidenceReadError&&error.status===404) {
+        let expired = (error instanceof EvidenceReadError) && error.status === 410;
+        if (prior && (error instanceof EvidenceReadError) && error.status === 404) {
           try{expired=!(await reader.pages(`actions/workflows/${prior.value.centralRun.workflowId}/runs`,'workflow_runs')).some(run=>run.id===id);}catch{/* Read denial is not expiry. */}
         }
         check(expired&&prior&&prior.value.attempts.every(a=>a.run.status==='completed'),'complete expired central history required');

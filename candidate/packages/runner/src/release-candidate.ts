@@ -159,7 +159,9 @@ export async function advanceReleaseCandidate(session: CandidateSession, io: Can
   if (written?.status !== 'APPLIED') return { status: 'WAIT', reason: written?.status ?? 'WRITE_UNKNOWN' };
   } else {
     session.generated = N; candidate.baseSha = N.baseSha; candidate.generatedSnapshotPath = `generated/${candidate.id}/${digest(N)}.json`;
-    candidate.publishedHead ??= H; await save();
+    // The reviewed human head already equals the three-way result. Adopt that
+    // exact head and retire the resolved conflict without rewriting its tree.
+    candidate.publishedHead = H; session.conflict = null; await save();
   }
   observed = await current();
   if (!observed.pr) {
@@ -170,7 +172,7 @@ export async function advanceReleaseCandidate(session: CandidateSession, io: Can
   }
   if (observed.pr.state === 'closed') return { status: 'WAIT', reason: 'CLOSED_PR' };
   session.preview = merged.files.filter(f => f.path.startsWith('.release-notes/') && f.content !== null)
-    .map(f => `# ${f.path}\n\n${f.content}` + renderReleaseContributors(session.identity!.units.find(u => `.release-notes/${u.id}.md` === f.path)!.contributors.contributors)).join('\n');
+    .map(f => `# ${f.path}\n\n${f.content}` + renderReleaseContributors(session.identity!.units.find(u => `.release-notes/${u.id}.md` === f.path)!.contributors.contributors)).join('\n').replace(/\r\n?/g, '\n');
   const archive = await save(); await statusComment(session.preview, archive, observed.pr.head);
   return { status: 'READY', prNumber: candidate.prNumber, head: candidate.publishedHead };
 }

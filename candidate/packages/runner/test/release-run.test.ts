@@ -50,7 +50,7 @@ import { prepareChannelDispatch, channelTargetsDigest, verifyChannelProbe, selec
 import { evidenceFixture, S, C, D, START, END, NOW } from './native-evidence-fixture.js';
 import { nativeRunFact, jobFact, inspectNativeCycle } from '../src/native-release-evidence.js';
 import { createHash } from 'node:crypto';
-import { readChannelSourceRejections, channelReadyTargets, channelPreparationResults } from '../src/release-run.js';
+import { readChannelSourceRejections, channelReadyTargets, channelPreparationResults, dispatchObservationFile } from '../src/release-run.js';
 import { decodeNativeSourceRejection } from '../../core/src/native-evidence.js';
 function channelFixture() {
   const f=evidenceFixture(),cycle=f.context.cycle;
@@ -64,25 +64,37 @@ function channelFixture() {
     items:targets.map(target=>({unitId:target.unitId,channelId:target.channelId,version:target.version,readStatus:'PENDING' as const,exists:true,digest:null,accepted:false,indexed:false,observedAt:END,evidenceKind:'github-pr:55'}))};
   return {...f,targets,request,run,job,report};
 }
-it('archives a moved native source only with complete zero-business jobs and exact rejection logs',async()=>{
+it.each(['search','native-response'])('archives a moved source through %s only with complete zero-business jobs and exact rejection logs',async mode=>{
   const f=channelFixture();f.request.canonicalRunId=null;
   const native={...f.runs.get(1),head_sha:'f'.repeat(40),head_branch:'trunk',path:f.run.path,display_title:f.run.displayTitle};
   const job={...f.jobs.get(1)![0],head_sha:native.head_sha,name:'source-check',steps:[{number:2,name:'Verify native source',started_at:START,completed_at:END,conclusion:'failure'}]};
   const bytes=Buffer.from(JSON.stringify({'run-name':'Channels ${{ inputs.request_key }}',on:{workflow_dispatch:{inputs:Object.fromEntries(Object.keys(f.request.inputs).map(key=>[key,{type:'string',required:true}]))}}}));
   const io={request:async(method:string,path:string)=>{
     expect(method).toBe('GET');
-    if(path.includes('/workflows/10/runs?')){expect(path).not.toContain('head_sha');return f.response({total_count:1,workflow_runs:[native]});}
+    if(path.includes('/workflows/10/runs?')){expect(mode).toBe('search');expect(path).not.toContain('head_sha');return f.response({total_count:1,workflow_runs:[native]});}
     if(path.includes('/jobs?'))return f.response({total_count:1,jobs:[job]});
     if(path.endsWith('/logs'))return f.response(`${END} STEWARD_SOURCE_REJECTED {"status":"REJECTED","reason":"SOURCE_REF_MOVED"}\n`);
     if(path.includes('/contents/'))return f.response({type:'file',encoding:'base64',content:bytes.toString('base64'),size:bytes.length,sha:createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex')});
     return f.response(native);
   }};
-  const files=await readChannelSourceRejections(f.context,[],io,NOW);expect(files).toHaveLength(1);
+  const value:any={schemaVersion:1,repositoryId:f.context.repositoryId,cycleId:f.context.cycle.id,requestKey:f.request.requestKey,observedAt:NOW,
+    kind:'RESPONSE',senderNonce:null,status:200,response:{workflow_run_id:native.id,run_url:`https://api.github.com/repos/${f.context.repository}/actions/runs/${native.id}`,
+    html_url:`https://github.com/${f.context.repository}/actions/runs/${native.id}`},run:null,window:null,pages:[],matches:[],errorCode:null,nextCheckAt:null};
+  const responses=mode==='native-response'?[{path:dispatchObservationFile(value).path,commit:D,value}]:[];
+  const files=await readChannelSourceRejections(f.context,[],io,NOW,responses);expect(files).toHaveLength(1);
   const proof={path:files[0]!.path,commit:D,value:decodeNativeSourceRejection(Buffer.from(files[0]!.content))};
   expect(selectChannelDispatch(f.context,f.report.items,[],[proof]).kind).toBe('reselect');
   expect((await inspectNativeCycle(f.context,[],f.io,NOW,{complete:true,observations:[],sourceRejections:[proof]})).budget.remaining).toBe(3);
-  expect(await readChannelSourceRejections(f.context,[proof],io,NOW)).toEqual([]);
-  job.steps[0]!.name='business-submit';await expect(readChannelSourceRejections(f.context,[],io,NOW)).rejects.toThrow('zero-business');
+  expect(await readChannelSourceRejections(f.context,[proof],io,NOW,responses)).toEqual([]);
+  if(responses.length){
+    await expect(readChannelSourceRejections(f.context,[],io,NOW,[{...responses[0]!,path:'evidence/dispatch/'+'0'.repeat(64)+'.json'}])).rejects.toThrow('source response provenance');
+    const wrong=structuredClone(value);wrong.response.run_url='https://api.github.com/repos/other/repo/actions/runs/100';
+    await expect(readChannelSourceRejections(f.context,[],io,NOW,[{path:dispatchObservationFile(wrong).path,commit:D,value:wrong}])).rejects.toThrow('source response identity');
+    const other=structuredClone(value);other.response.workflow_run_id=101;other.response.run_url=other.response.run_url.replace('/100','/101');other.response.html_url=other.response.html_url.replace('/100','/101');
+    await expect(readChannelSourceRejections(f.context,[],io,NOW,[...responses,{path:dispatchObservationFile(other).path,commit:D,value:other}])).rejects.toThrow('ambiguous source response');
+    native.id=101;await expect(readChannelSourceRejections(f.context,[],io,NOW,responses)).rejects.toThrow('source response Run ID');native.id=100;
+  }
+  job.steps[0]!.name='business-submit';await expect(readChannelSourceRejections(f.context,[],io,NOW,responses)).rejects.toThrow('zero-business');
 });
 it.each(['active','wrong-actor','started','wrong-log','changed-ref'])('rejects %s source-rejection claims',kind=>{
   const f=channelFixture();f.request.canonicalRunId=null;

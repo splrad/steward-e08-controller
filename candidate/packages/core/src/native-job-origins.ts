@@ -2,6 +2,13 @@ import type { NativeJob } from './native-evidence.js';
 
 export interface NativeJobAttempt { attempt: number; jobs: NativeJob[] }
 export interface NativeJobOrigin { job: NativeJob; origin: NativeJob }
+/** Native job/step ends have second precision; log receipts retain fractions.
+ * Accept the final native second, without extending a finer timestamp. */
+export function withinNativeJobWindow(at: string, start: string, end: string | null): boolean {
+  const value = Date.parse(at), first = Date.parse(start), last = end === null ? null : Date.parse(end);
+  return Number.isFinite(value) && Number.isFinite(first) && value >= first && (last === null
+    || Number.isFinite(last) && (last % 1000 === 0 ? value < last + 1000 : value <= last));
+}
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 function check(value: unknown, reason: string): asserts value {
   if (!value) throw new Error(`NATIVE_EVIDENCE: job origin ${reason}`);

@@ -2,13 +2,13 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtemp,mkdir,writeFile,rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { readChannelArtifacts,prepareChannelDispatch,channelTargetsDigest } from '../src/release-run.js';
+import { readChannelArtifacts,prepareChannelDispatch,channelTargetsDigest,channelEvidenceFile } from '../src/release-run.js';
 import { nativeRunFact } from '../src/native-release-evidence.js';
 import * as downloads from '../src/native-artifact-download.js';
 import { evidenceFixture,S,C,D,START,END,NOW } from './native-evidence-fixture.js';
 const roots:string[]=[];
 afterEach(async()=>{vi.restoreAllMocks();for(const root of roots.splice(0))await rm(root,{recursive:true,force:true});});
-it.each(['valid','retained','expired','wrong-run','duplicate','future-payload','self-artifact','changed-digest','failed-probe'])('recovers probe by exact Run artifact inventory without trusting upload output: %s',async kind=>{
+it.each(['valid','formatted','retained','expired','wrong-run','duplicate','future-payload','self-artifact','changed-digest','failed-probe'])('recovers probe by exact Run artifact inventory without trusting upload output: %s',async kind=>{
   const f=evidenceFixture(),unit=f.context.cycle.units[0]!;
   Object.assign(unit,{releaseId:20,manifestDigest:'d'.repeat(64),notesDigest:'e'.repeat(64),assets:[{id:'app',path:'app.zip',size:1,sha256:'f'.repeat(64)}]});
   f.context.cycle.requiredChannels=[{unitId:'app',channelId:'winget'}];
@@ -30,11 +30,20 @@ it.each(['valid','retained','expired','wrong-run','duplicate','future-payload','
   }};
   const download=vi.spyOn(downloads,'downloadNativeArtifact').mockImplementation(async(input,token)=>{
     expect(token).toBe('fixture-read-token');expect(input.artifactId).toBe(700);expect(input.digest).toBe(artifact.digest);expect(input.names).toEqual(['report.json']);
-    await mkdir(input.directory);await writeFile(join(input.directory,'report.json'),JSON.stringify(payload));
+    await mkdir(input.directory);await writeFile(join(input.directory,'report.json'),kind==='formatted'?JSON.stringify(payload,null,2)+'\n':JSON.stringify(payload));
   });
   const root=await mkdtemp(join(tmpdir(),'channel-artifact-'));roots.push(root);
   const result=readChannelArtifacts(f.context,run,targets,null,root,'controller','fixture-read-token',io,NOW);
-  if(kind==='valid'||kind==='retained'){const value=await result;expect(value.files).toHaveLength(1);expect(value.reads).toEqual(payload.items);expect(JSON.parse(value.files[0]!.content)).toMatchObject({artifact:{id:700},job:{id:1000},run:{runAttempt:1}});}
+  if(['valid','formatted','retained'].includes(kind)){
+    const value=await result;expect(value.files).toHaveLength(1);expect(value.reads).toEqual(payload.items);
+    const record=JSON.parse(value.files[0]!.content);expect(record).toMatchObject({artifact:{id:700},job:{id:1000},run:{runAttempt:1}});
+    if(kind==='formatted'){
+      expect(record.payload).toBe(JSON.stringify(payload,null,2)+'\n');
+      expect(()=>channelEvidenceFile({...record,artifact:{...record.artifact,name:record.artifact.name+'\n'}})).toThrow();
+      expect(()=>channelEvidenceFile({...record,payload:record.payload.replace('"schemaVersion": 1','"schemaVersion": 1,"schemaVersion": 1')})).toThrow();
+      expect(()=>channelEvidenceFile({...record,payload:record.payload.replace('github-pr:3','github-pr:3\\n')})).toThrow();
+    }
+  }
   else if(kind==='expired'||kind==='failed-probe'){expect((await result).files).toEqual([]);expect(download).not.toHaveBeenCalled();}
   else await expect(result).rejects.toThrow();
 });

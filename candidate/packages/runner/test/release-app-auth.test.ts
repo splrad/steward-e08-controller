@@ -41,7 +41,7 @@ it('refuses widened update read credentials before repository processing',async(
 it('scopes Pages maintenance to one product, without Pages deployment or workflow write permission',async()=>{
   const f=fixture(),app=await nativeReleaseApp(key,f.fetcher);
   await expect(app.forPagesRepository(12,async()=>{throw Error('fixture Pages failure');})).rejects.toThrow('fixture Pages failure');
-  expect(f.minted).toEqual([{repository_ids:[12],permissions:{metadata:'read',contents:'write',actions:'write',administration:'read',actions_variables:'read',deployments:'read',attestations:'read'}}]);
+  expect(f.minted).toEqual([{repository_ids:[12],permissions:{metadata:'read',contents:'write',actions:'write',administration:'read',actions_variables:'read',deployments:'read',attestations:'read',organization_administration:'write'}}]);
   expect(f.revoked).toHaveLength(1);
 });
 it('rejects widened Pages maintenance credentials before any product operation',async()=>{
@@ -53,7 +53,7 @@ it('discovers using metadata only, scopes each new token to one repository, and 
   expect(app.appBotId).toBe(301115370);expect((await app.discover()).map(repo=>repo.id)).toEqual([1,2]);
   const tokens:string[]=[];await app.forRepository(1,async token=>tokens.push(token));await app.forRepository(1,async token=>tokens.push(token));
   expect(new Set(tokens).size).toBe(2);expect(f.minted[0]).toEqual({permissions:{metadata:'read'}});
-  expect(f.minted.slice(1).every(body=>JSON.stringify(body.repository_ids)==='[1]'&&body.permissions.actions==='write'&&body.permissions.contents==='write'&&body.permissions.administration==='read')).toBe(true);
+  expect(f.minted.slice(1).every(body=>JSON.stringify(body.repository_ids)==='[1]'&&body.permissions.actions==='write'&&body.permissions.contents==='write'&&body.permissions.checks==='read'&&body.permissions.administration==='read'&&body.permissions.organization_administration==='write')).toBe(true);
   expect(f.minted.slice(1).some(body=>body.permissions.issues||body.permissions.pull_requests)).toBe(false);expect(f.revoked).toHaveLength(3);
 });
 it('rejects widened token scope before any repository operation, while revoking it',async()=>{
@@ -71,13 +71,13 @@ it('separates candidate write permission from the read-only Release Please crede
   const f=fixture(),app=await nativeReleaseApp(key,f.fetcher);let called=false;
   await app.forCandidateRepository(1,async(write,read)=>{called=true;expect(write).not.toBe(read);});
   expect(called).toBe(true);expect(f.revoked).toHaveLength(2);
-  expect(f.minted[0]).toEqual({repository_ids:[1],permissions:{metadata:'read',contents:'write',pull_requests:'write',issues:'write',administration:'read',actions:'read'}});
+  expect(f.minted[0]).toEqual({repository_ids:[1],permissions:{metadata:'read',contents:'write',pull_requests:'write',issues:'write',administration:'read',actions:'read',organization_administration:'write'}});
   expect(f.minted[1]).toEqual({repository_ids:[1],permissions:{metadata:'read',contents:'read',pull_requests:'read',issues:'read'}});
 });
 it('scopes quality to contents/checks write and PR/actions read, revoking on failure',async()=>{
   const f=fixture(),app=await nativeReleaseApp(key,f.fetcher);
   await expect(app.forQualityRepository(1,async()=>{throw Error('fixture quality error');})).rejects.toThrow('fixture quality error');
-  expect(f.minted).toEqual([{repository_ids:[1],permissions:{metadata:'read',contents:'write',checks:'write',pull_requests:'read',actions:'read'}}]);
+  expect(f.minted).toEqual([{repository_ids:[1],permissions:{metadata:'read',contents:'write',checks:'write',pull_requests:'read',actions:'read',organization_administration:'write'}}]);
   expect(f.revoked).toHaveLength(1);
 });
 it('refuses a widened quality credential before any Check or state write',async()=>{
@@ -90,7 +90,7 @@ it('scopes template writes separately from bootstrap/protection reads and revoke
   await expect(app.forTemplateRepository(12,async(write,read)=>{expect(write).not.toBe(read);throw Error('fixture template failure');})).rejects.toThrow('fixture template failure');
   expect(f.minted).toEqual([
     {repository_ids:[12],permissions:{metadata:'read',contents:'write',pull_requests:'write',workflows:'write'}},
-    {repository_ids:[12],permissions:{metadata:'read',contents:'read',pull_requests:'read',actions_variables:'read',actions:'read'}}
+    {repository_ids:[12],permissions:{metadata:'read',contents:'read',pull_requests:'read',actions_variables:'read',actions:'read',organization_administration:'write'}}
   ]);
   expect(f.revoked).toHaveLength(2);
 });

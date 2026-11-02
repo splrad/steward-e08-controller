@@ -34,6 +34,7 @@ export { nativeJobOrigins, originalJobExecutions } from '../../core/src/native-j
 export { evaluateCompletion } from '../../core/src/release-observation.js';
 export { NativeGitHubRelease, nativeGhCommand, nativeReleaseDownload } from './gh-release.js';
 export { nativeReleaseApp } from '../../github/src/app-auth.js';
+export { completeMergedPull } from '../../github/src/merged-pull.js';
 export {maintenanceWorkflows,maintenanceJobKeys,maintenanceDisposition,maintenanceFailed,decodeMaintenanceRecord,assertMaintenanceProgress} from '../../core/src/maintenance.js';
 export {validatePagesSource,pagesRecordPath,decodePagesMaintenance,assertPagesProgress} from '../../core/src/pages-maintenance.js';
 export { bootstrapRepository, bootstrapRulePolicyDigest, decodeBootstrapRecovery } from './repository-bootstrap.js';

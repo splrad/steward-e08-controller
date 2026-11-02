@@ -144,6 +144,9 @@ it('native wire permits only own neutral Check output, uses no third-party mutat
   await expect(io.writeCheck({...body,conclusion:'success'},42)).rejects.toThrow('CHECK_WRITE');
   await expect(io.writeCheck({...body,output:{...body.output,annotations:[]}},42)).rejects.toThrow('CHECK_OUTPUT');
   await expect(io.get('/repos/foreign/product/pulls/1')).rejects.toThrow('READ_PATH');
+  await io.get('/repos/test/product');
+  expect(calls.at(-1).url).toBe('https://api.github.com/repos/test/product');
+  await expect(io.get('/repos/test/product-other')).rejects.toThrow('READ_PATH');
   const rules=[{type:'creation',ruleset_id:1},{type:'update',ruleset_id:1},{type:'non_fast_forward',ruleset_id:2},{type:'deletion',ruleset_id:2}];
   let integrityBypass:any[]=[];
   const protection={get:async(path:string)=>({headers:new Headers(),value:path.includes('/rules/branches/')?rules:

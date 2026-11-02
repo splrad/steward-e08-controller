@@ -44,7 +44,7 @@ jobs:
           STEWARD_APP_PRIVATE_KEY: ${{ secrets.STEWARD_APP_PRIVATE_KEY }}
           STEWARD_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           STEWARD_CONTROLLER_SHA: ${{ github.workflow_sha }}
-          STEWARD_COPILOT_TOKEN: ${{ secrets.STEWARD_COPILOT_TOKEN }}
+          STEWARD_COPILOT_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
         run: node scripts/release-coordinator.mjs
 
   automation-health:

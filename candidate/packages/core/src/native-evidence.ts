@@ -49,10 +49,12 @@ export interface NativeDispatchObservation {
 }
 /** Original native Run observations and the platform bound, not a cached retry counter. */
 export interface NativeRetryLimit {
-  schemaVersion: 1; repositoryId: number; cycleId: string; requestKey: string; operationKey: string;
+  schemaVersion: 1|2; repositoryId: number; cycleId: string; requestKey: string; operationKey: string;
   observedAt: string; sourceUrl: string; firstRun: NativeRun; terminalRun: NativeRun;
-  reason: 'AGE' | 'RERUN_COUNT'; attemptEvidencePaths: string[];
+  reason: 'AGE' | 'RERUN_COUNT' | 'PLATFORM_LIMIT'; attemptEvidencePaths: string[];
   response: { sourceUrl: string; status: number; body: string; digest: string } | null;
+  platform?: {checkSuiteId:number;suiteSourceUrl:string;suite:{id:number;repositoryId:number;appId:number;appSlug:string;headSha:string;status:string;conclusion:string;runsRerequestable:boolean};
+    page:{sourceUrl:string;status:number;body:string;digest:string}};
 }
 export interface NativePublication {
   schemaVersion:1; repositoryId:number; cycleId:string; sourceSha:string; observedAt:string;
@@ -153,8 +155,10 @@ export function decodeNativeChannelRead(bytes:Uint8Array):NativeChannelRead {
   return structuredClone(value);
 }
 export function decodeNativeChannel(bytes:Uint8Array):NativeChannelEvidence {
-  const input=decodeBuildJson(bytes);if(!channelValidator(input))throw new Error('NATIVE_CHANNEL: envelope');
-  const value=input as unknown as NativeChannelEvidence,payload=decodeBuildJson(Buffer.from(value.payload)) as any;
+  const input=decodeBuildJson(bytes,'oci');if(!channelValidator(input))throw new Error('NATIVE_CHANNEL: envelope');
+  const value=input as unknown as NativeChannelEvidence;
+  decodeBuildJson(Buffer.from(JSON.stringify({...value,payload:'raw'})));
+  const payload=decodeBuildJson(Buffer.from(value.payload)) as any;
   if(!value.cycleId.endsWith('-'+value.sourceSha)||value.run.repositoryId!==value.repositoryId||value.run.headRepositoryId!==value.repositoryId
     ||value.run.path!=='.github/workflows/steward-release-channels.yml'||value.run.event!=='workflow_dispatch'||value.job.runId!==value.run.id
     ||value.job.runAttempt!==value.run.runAttempt||value.job.headSha!==value.run.headSha||value.job.status!=='completed'
@@ -188,17 +192,24 @@ const limitValidator=ajv.compile(closed({schemaVersion:{const:1},repositoryId:id
   requestKey:digest,operationKey:digest,observedAt:timestamp,sourceUrl:string,firstRun:runSchema,terminalRun:runSchema,
   reason:{enum:['AGE','RERUN_COUNT']},attemptEvidencePaths:array(string),
   response:nullable(closed({sourceUrl:string,status:{type:'integer',minimum:400,maximum:599},body:{type:'string',maxLength:8192},digest}))}));
+const platformLimitValidator=ajv.compile(closed({schemaVersion:{const:2},repositoryId:id,cycleId:{...string,pattern:'^pr-[1-9][0-9]*-[a-f0-9]{40}$'},
+  requestKey:digest,operationKey:digest,observedAt:timestamp,sourceUrl:string,firstRun:runSchema,terminalRun:runSchema,reason:{const:'PLATFORM_LIMIT'},attemptEvidencePaths:array(string),response:{type:'null'},
+  platform:closed({checkSuiteId:id,suiteSourceUrl:string,suite:closed({id,repositoryId:id,appId:id,appSlug:string,headSha:sha,status:string,conclusion:string,runsRerequestable:{type:'boolean'}}),
+    page:closed({sourceUrl:string,status:{const:200},body:{type:'string',minLength:1,maxLength:384*1024},digest})})}));
 export function decodeNativeRetryLimit(bytes:Uint8Array):NativeRetryLimit {
-  const value=decodeBuildJson(bytes);
-  if(!limitValidator(value))throw new Error('NATIVE_RETRY_LIMIT: contract');
+  const value=decodeBuildJson(bytes,'oci');
+  if(!limitValidator(value)&&!platformLimitValidator(value))throw new Error('NATIVE_RETRY_LIMIT: contract');
   const record=value as unknown as NativeRetryLimit, a=record.firstRun,b=record.terminalRun;
-  const identity=(run:NativeRun)=>JSON.stringify([run.id,run.repositoryId,run.headRepositoryId,run.workflowId,run.path,run.event,run.headSha,run.headBranch,run.actorId,run.createdAt,run.displayTitle]);
+  decodeBuildJson(Buffer.from(JSON.stringify({...record,...(record.platform?{platform:{...record.platform,page:{...record.platform.page,body:'raw'}}}:{})})));
+  const identity=(run:NativeRun)=>JSON.stringify([run.id,run.repositoryId,run.headRepositoryId,run.workflowId,run.path,run.event,run.headSha,run.headBranch,run.actorId,run.displayTitle]);
   if(identity(a)!==identity(b)||a.repositoryId!==record.repositoryId||a.runAttempt!==1||b.status!=='completed'||!b.conclusion
+    ||Date.parse(b.createdAt)<Date.parse(a.createdAt)||Date.parse(b.createdAt)>Date.parse(b.updatedAt)
     ||Date.parse(record.observedAt)<Date.parse(b.updatedAt)||record.attemptEvidencePaths.length!==b.runAttempt
     ||new Set(record.attemptEvidencePaths).size!==b.runAttempt
     ||record.attemptEvidencePaths.some((path,i)=>!new RegExp(`^evidence/native/${b.id}-${i+1}/[a-f0-9]{64}\\.json$`).test(path))
     ||record.reason==='AGE'&&Date.parse(record.observedAt)-Date.parse(a.createdAt)<=30*24*60*60_000
-    ||record.reason==='RERUN_COUNT'&&(b.runAttempt-1<50||!record.response||record.response.status!==422))
+    ||record.reason==='RERUN_COUNT'&&(b.runAttempt-1<50||!record.response||record.response.status!==422)
+    ||record.reason==='PLATFORM_LIMIT'&&(record.schemaVersion!==2||b.runAttempt<50||b.conclusion!=='startup_failure'||!record.platform||record.response!==null))
     throw new Error('NATIVE_RETRY_LIMIT: identity or bound');
   return structuredClone(record);
 }

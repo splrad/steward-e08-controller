@@ -22,12 +22,22 @@ function channel(attempts=1,mode:'submit'|'verify'='submit') {
   f.store.archive=async next=>{const saved=await original(next);records.push(...saved.records);files.push(...next);return {...saved,records:[...records],files:[...files]};};
   return {...f,records,files};
 }
-it('continues on reviewed current R while preserving original failures and the full frozen target set',async()=>{
+it.each([false,true])('inspects a continuation on new R with original history; missing proof=%s',async missing=>{
   const f=channel(2);await recoverNativeCycle(f.context,100,f.store,[],f.io,OLD);
   const file=f.files.find(file=>file.path.includes('retry-limit'))!,proof={path:file.path,commit:D,value:JSON.parse(file.content)};
   const next=prepareContinuation(f.context,proof,f.records,OLD,{ref:'main',sha:D});f.context.cycle.dispatches.push(next);
   expect(()=>validateEvidenceContext(f.context)).not.toThrow();expect(next.inputs.targets_json).toBe(f.request.inputs.targets_json);
   expect(next.executionSha).toBe(D);expect(next.sourceSha).toBe(f.request.sourceSha);expect(next.inputs.operation_key).toBe(next.operationKey);
+  expect(next.operationKey).not.toBe(f.request.operationKey);
+  next.canonicalRunId=200;next.nativeResponseEvidencePath='evidence/dispatch/continuation.json';
+  const run={...f.runs.get(1),id:200,head_sha:D,created_at:OLD,updated_at:OLD,status:'in_progress',conclusion:null,display_title:next.requestKey};
+  for(const path of ['actions/runs/200','actions/runs/200/attempts/1'])f.overrides.set('GET /repos/example/product/'+path,f.response(run));
+  f.overrides.set('GET /repos/example/product/actions/runs/200/attempts/1/jobs?per_page=100',f.response({total_count:0,jobs:[]}));
+  f.overrides.set('GET /repos/example/product/actions/runs/200/artifacts?per_page=100',f.response({total_count:0,artifacts:[]}));
+  const result=await inspectNativeCycle(f.context,f.records,f.io,OLD,{complete:true,observations:[],retryLimits:missing?[]:[proof]});
+  expect(result.missingNativeKeys).toEqual(missing?[`request:${next.requestKey}:native-limit-proof-required`]:[]);
+  expect(result.budget.remaining).toBe(missing?null:1);
+  expect(result.native.runs.map(r=>r.runId)).toEqual([100,200]);
 });
 it.each([false,true])('pending preparation has zero failures and current readiness=%s controls exact job rerun',async ready=>{
   const f=channel(1,'verify'),raw=f.runs.get(1),job=f.jobs.get(1)![0];
@@ -64,6 +74,24 @@ it('archives original first/terminal Run and all attempts before allowing age co
   expect(next.operationKey).toBe(f.request.operationKey);expect(next.requestKey).not.toBe(f.request.requestKey);expect(next.continuationOfRunId).toBe(100);
   expect(next.canonicalRunId).toBeNull();expect(next.purpose).toBe('channel-submit');expect(result.observation.budget.remaining).toBe(1);
 });
+it('keeps the thirty-day origin when a recent attempt has its own native creation time',async()=>{
+  const f=channel(2),shift=(time:string)=>new Date(Date.parse(time)+30*24*60*60_000).toISOString();
+  const run=f.runs.get(2),job=f.jobs.get(2)![0],execution=f.results.get(2)!.execution;
+  run.created_at=shift(run.created_at);run.updated_at=shift(run.updated_at);
+  for(const value of [job,...job.steps]){value.started_at=shift(value.started_at);value.completed_at=shift(value.completed_at);}
+  execution.startedAt=shift(execution.startedAt);execution.completedAt=shift(execution.completedAt!);execution.observedAt=shift(execution.observedAt);
+  const original=f.io.request;
+  f.io.request=async(method,path,...args)=>{
+    const response=await original(method,path,...args);
+    if(method==='GET'&&path==='/repos/example/product/actions/runs/100')return f.response({...run,created_at:f.runs.get(1).created_at});
+    return response;
+  };
+  const result=await recoverNativeCycle(f.context,100,f.store,[],f.io,OLD);
+  expect(result.status).toBe('CONTINUATION_REQUIRED');expect(f.calls.some(c=>c.startsWith('POST'))).toBe(false);
+  const proof=decodeNativeRetryLimit(Buffer.from(f.files.find(file=>file.path.includes('retry-limit'))!.content));
+  expect(proof.firstRun.createdAt).toBe(START);expect(proof.terminalRun.createdAt).toBe(shift(START));
+  expect(()=>decodeNativeRetryLimit(Buffer.from(JSON.stringify({...proof,terminalRun:{...proof.terminalRun,createdAt:'2026-10-25T00:00:00.000Z'}})))).toThrow();
+});
 it('never rebuilds an expired build Run',async()=>{
   const f=evidenceFixture();const original=f.store.archive;f.store.archive=async files=>({...await original(files),files});
   expect((await recoverNativeCycle(f.context,100,f.store,[],f.io,OLD)).reason).toBe('BUILD_CANNOT_CONTINUE');
@@ -75,6 +103,45 @@ it.each([50,51])('requires both fifty actual reruns and explicit platform respon
   const result=await recoverNativeCycle(f.context,100,f.store,[],f.io,NOW);
   expect(result.status).toBe(count===51?'CONTINUATION_REQUIRED':'UNKNOWN');
   expect(f.files.filter(file=>file.path.startsWith('evidence/retry-limit/'))).toHaveLength(count===51?1:0);
+});
+const platformPage=(run=100,job=false)=>`<div role="region" aria-label="Annotations" data-url="/example/product/actions/runs/${run}/annotations_partial"><table><annotation-message><a href="/example/product/actions/runs/${run}/${job?'job/1000':'workflow'}"><strong>Error</strong></a><div data-target="annotation-message.annotationContainer"><div>You've exceeded the maximum number of rerun attempts (50) for this workflow run.</div></div></annotation-message></table></div>`;
+function platformFixture(count=50) {
+  const f=channel(count);for(const jobs of f.jobs.values())jobs[0].steps=[];
+  Object.assign(f.runs.get(count),{conclusion:'startup_failure',check_suite_id:500,check_suite_url:'https://api.github.com/repos/example/product/check-suites/500'});
+  const suite={id:500,repository:{id:1},app:{id:15368,slug:'github-actions'},head_sha:f.request.executionSha,status:'completed',conclusion:'startup_failure',runs_rerequestable:false};
+  f.overrides.set('GET /repos/example/product/check-suites/500',f.response(suite));
+  const page={status:200,headers:new Headers({'content-type':'text/html'}),bytes:Buffer.from(platformPage())};
+  const io={...f.io,readRunPage:async(repository:string,runId:number)=>{expect(repository).toBe('example/product');expect(runId).toBe(100);return page;}};
+  return {...f,io,suite,page};
+}
+it('adopts the stable platform check-suite limit at 50 attempts without pretending it is 50 executed reruns',async()=>{
+  const f=platformFixture(),result=await recoverNativeCycle(f.context,100,f.store,[],f.io,NOW);
+  expect(result).toMatchObject({status:'CONTINUATION_REQUIRED',reason:'NATIVE_RETRY_LIMIT'});
+  expect(f.calls.some(c=>c.startsWith('POST'))).toBe(false);
+  const file=f.files.find(f=>f.path.startsWith('evidence/retry-limit/'))!,value=decodeNativeRetryLimit(Buffer.from(file.content));
+  expect(value.schemaVersion).toBe(2);expect(value.reason).toBe('PLATFORM_LIMIT');expect(value.terminalRun.runAttempt-1).toBe(49);
+  expect(value.platform!.page.body).toBe(platformPage());expect(value.attemptEvidencePaths).toHaveLength(50);
+  expect(prepareContinuation(f.context,{path:file.path,commit:D,value},f.records,NOW).continuationOfRunId).toBe(100);
+});
+it.each(['job-message','wrong-run','duplicate','script','comment','other-app','suite-source','suite-changing','page-403','missing-page','future-terminal','only-49'])('rejects %s as platform limit proof',async kind=>{
+  const f=platformFixture(kind==='only-49'?49:50);
+  if(kind==='job-message')f.page.bytes=Buffer.from(platformPage(100,true));
+  if(kind==='wrong-run')f.page.bytes=Buffer.from(platformPage(101));
+  if(kind==='duplicate')f.page.bytes=Buffer.from(platformPage()+platformPage());
+  if(kind==='script')f.page.bytes=Buffer.from('<script>'+platformPage()+'</script>');
+  if(kind==='comment')f.page.bytes=Buffer.from('<!--'+platformPage()+'-->');
+  if(kind==='other-app')f.suite.app.id=999;
+  if(kind==='suite-source')f.suite.head_sha=D;
+  if(kind==='page-403')f.page.status=403;
+  if(kind==='missing-page')f.io.readRunPage=undefined as never;
+  if(kind==='future-terminal')f.runs.get(50).updated_at='2027-01-01T00:00:00Z';
+  if(kind==='suite-changing'){
+    const original=f.io.request;let reads=0;f.io.request=async(method,path,...args)=>path.endsWith('/check-suites/500')?f.response({...f.suite,head_sha:++reads>1?D:f.suite.head_sha}):original(method,path,...args);
+  }
+  f.overrides.set('GET /repos/example/product/check-suites/500',f.response(f.suite));
+  const result=await recoverNativeCycle(f.context,100,f.store,[],f.io,NOW);
+  expect(result.status).toBe('UNKNOWN');expect(f.files.some(f=>f.path.startsWith('evidence/retry-limit/'))).toBe(false);
+  expect(f.calls.some(c=>c.startsWith('POST'))).toBe(false);
 });
 it.each([403,429,500])('HTTP %i never proves a retry limit',async status=>{
   const f=channel(51);for(const jobs of f.jobs.values())jobs[0].steps=[];

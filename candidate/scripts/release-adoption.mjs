@@ -114,7 +114,7 @@ export async function recoverReleaseCaches(request,snapshot,{token,io=nativeEvid
       changes.push({path,content,sha256:digest(content),previousSha256:current?digest(await bytes(current.blobSha)):null});
     }
     if((await proof.reader.json('git/ref/heads/steward/release-state')).object?.sha!==snapshot.head)fail('recovery ref moved');
-    await assertReleaseWriterProtection(request.repository,'steward/release-state',io);
+    await assertReleaseWriterProtection(request.repository,'steward/release-state',io,{token});
     await mkdir(request.writeDirectory,{recursive:true});const directory=join(request.writeDirectory,'recover-'+digest(JSON.stringify([snapshot.head,changes])));
     const written=await writeReleaseRecords({directory,remote:request.remote,repositoryId:request.repositoryId,defaultBranch:request.defaultBranch,
       targetRef:'steward/release-state',writer:'release',expectedHead:snapshot.head,allowedPaths:changes.map(f=>f.path),changes,identity:request.identity},{token});
@@ -176,7 +176,7 @@ export async function initializeReleaseAdoption(request,{token,io=nativeEvidence
       :{schemaVersion:3,repositoryId:request.repositoryId,defaultBranch:request.defaultBranch,revision:0,releaseAdoption:request.releaseAdoption,
         lastObservedDefaultSha:request.releaseAdoption.sourceSha,lastCompletedCycleId:null,activeCycleId:null,candidate:null,nextCheckAt:null,lastProgressAt:null,lastErrorCode:null};
     const content=JSON.stringify(repository,null,2)+'\n';decodeReleaseRecord('repository',Buffer.from(content));assertRepositoryWrite(repository,previous);
-    await assertReleaseWriterProtection(request.repository,'steward/release-state',io);
+    await assertReleaseWriterProtection(request.repository,'steward/release-state',io,{token});
     if((await proof.reader.json(`commits/${encodeURIComponent(request.defaultBranch)}`)).sha!==proof.defaultHead)fail('default head moved');
     const current=await io.request('GET',`/repos/${request.repository}/git/ref/heads/steward/release-state`);
     if(current.status!==response.status||current.status===200&&JSON.parse(Buffer.from(current.bytes).toString()).object?.sha!==snapshot.head)fail('state moved');

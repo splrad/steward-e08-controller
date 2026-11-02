@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, mkdir, rm, writeFile, copyFile, open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { nativeReleaseInspector } from '../src/release-native.js';
 import { collectFileBuildManifest } from '../src/build-manifest.js';
 import { BuildContractError, type BuildArtifactInput } from '../../core/src/build-manifest.js';
@@ -79,6 +79,21 @@ it('classifies invalid package metadata as deterministic but preserves missing-f
   await expect(inspector.inspectPath!(join(root,'missing','package.json'))).rejects.toMatchObject({code:'ENOENT'});
  } finally { await rm(root, {recursive:true}); }
 });
+it('bounds package metadata even when the opened file grows after its size check', async () => {
+ const root = await mkdtemp(join(tmpdir(), 'native-growing-metadata-'));
+ const path = join(root, 'package.json');
+ try {
+  await writeFile(path, '{"name":"pkg","version":"1.2.3"}');
+  const probe = await open(path), prototype = Object.getPrototypeOf(probe), stat = prototype.stat;
+  await probe.close();
+  vi.spyOn(prototype, 'stat').mockImplementationOnce(async function(this: Awaited<ReturnType<typeof open>>) {
+   const before = await stat.call(this);
+   await writeFile(path, JSON.stringify({name:'pkg',version:'1.2.3',padding:'x'.repeat(512*1024)}));
+   return before;
+  });
+  await expect(nativeReleaseInspector('unused',root).inspectPath!(path)).rejects.toThrow('RN_BUILD_LIMIT');
+ } finally { vi.restoreAllMocks(); await rm(root,{recursive:true}); }
+});
 it.skipIf(process.platform !== 'win32')('classifies successful malformed output without treating an unknown process failure as deterministic', async () => {
  const root = await mkdtemp(join(tmpdir(), 'native-process-'));
  registerOfflineFixtureRoot(root);
@@ -91,4 +106,4 @@ it.skipIf(process.platform !== 'win32')('classifies successful malformed output 
   const error = await nativeReleaseInspector(script, root).inspectPath!('fixture.zip').catch(e => e);
   expect(error).not.toBeInstanceOf(BuildContractError); expect(error.code).toBe(3);
  } finally { await rm(root, {recursive:true}); }
-});
+}, 30_000); // Two real PowerShell launches can exceed five seconds on hosted Windows.

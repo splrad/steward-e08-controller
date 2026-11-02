@@ -266,7 +266,9 @@ def deliver(request, api, central_api, *, read_token=None, renderer=copier.rende
             if not adopted:
                 body += '\n首次采用请核对全部公共文件；如有同名差异，完整报告见 `.github/steward-template-adoption.md`。\n'
             try: api.create_pr(repository, request['defaultBranch'], body)
-            except (NativeFailure, subprocess.TimeoutExpired): pass
+            except (NativeFailure, subprocess.TimeoutExpired):
+                # Creation may have succeeded; the next native PR read is authoritative.
+                pass
             current = pulls()
             if current and current['state'] == 'open':
                 require(current['head']['sha'] == delivered, 'PR_READBACK_DRIFT')
@@ -308,7 +310,9 @@ def deliver(request, api, central_api, *, read_token=None, renderer=copier.rende
         parents = list(dict.fromkeys(([head] if head else []) + [base]))
         message = ('chore: update common repository template\n\n' + signoff + '\n'
                    + f"Steward-Sync-Run: {CENTRAL_ID}/{request['runId']}\n"
-                   + f"Steward-Sync-Source: {request['workflowSha']}\nSteward-Template: {template_sha}\n")
+                   # The native API removes trailing newlines. Send its canonical
+                   # representation so signature readback can still compare exactly.
+                   + f"Steward-Sync-Source: {request['workflowSha']}\nSteward-Template: {template_sha}")
         try: commit = api.request('POST', prefix + '/git/commits', {'message':message,'tree':tree,'parents':parents})
         except (NativeFailure, subprocess.TimeoutExpired): return {'status':'WAIT_COMMIT_RESPONSE'}
         commit_sha = commit.get('sha'); require(isinstance(commit_sha,str) and SHA.fullmatch(commit_sha), 'COMMIT_SHA')
@@ -316,7 +320,9 @@ def deliver(request, api, central_api, *, read_token=None, renderer=copier.rende
         try:
             if head: api.request('PATCH', prefix + '/git/refs/heads/' + BRANCH, {'sha':commit_sha,'force':False})
             else: api.request('POST', prefix + '/git/refs', {'ref':'refs/heads/'+BRANCH,'sha':commit_sha})
-        except (NativeFailure, subprocess.TimeoutExpired): pass
+        except (NativeFailure, subprocess.TimeoutExpired):
+            # Reconcile the actual ref after an ambiguous write response.
+            pass
         actual = ref(BRANCH)
         if actual is None or actual == head: return {'status':'WAIT_REF_READBACK','candidate':commit_sha}
         fetch_branch(BRANCH, actual)

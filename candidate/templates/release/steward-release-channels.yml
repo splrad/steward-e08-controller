@@ -213,7 +213,7 @@ jobs:
           WINGET_FORK_REPOSITORY: ${{ vars.WINGET_FORK_REPOSITORY }}
           GHCR_OWNER_PACKAGE_INVENTORY: ${{ vars.GHCR_OWNER_PACKAGE_INVENTORY }}
         run: |
-          
+
           $ErrorActionPreference='Stop'
           $selection=Get-Content -LiteralPath selection.json -Raw | ConvertFrom-Json
           $items=@()
@@ -348,7 +348,7 @@ jobs:
           WINGET_FORK_REPOSITORY: ${{ vars.WINGET_FORK_REPOSITORY }}
           GHCR_OWNER_PACKAGE_INVENTORY: ${{ vars.GHCR_OWNER_PACKAGE_INVENTORY }}
         run: |
-          
+
           $ErrorActionPreference='Stop'
           $selection=Get-Content -LiteralPath selection.json -Raw | ConvertFrom-Json
           $items=@()
@@ -502,7 +502,7 @@ jobs:
           GHCR_TOKEN: ${{ github.token }}
           GHCR_OWNER_PACKAGE_INVENTORY: ${{ vars.GHCR_OWNER_PACKAGE_INVENTORY }}
         run: |
-          
+
           $ErrorActionPreference='Stop'
           $manifest=Get-Content -LiteralPath manifest.json -Raw|ConvertFrom-Json
           $version=$manifest.version
@@ -558,7 +558,7 @@ jobs:
           UNIT: ${{ matrix.unitId }}
           CHANNEL: ${{ matrix.channelId }}
         run: |
-          
+
           $selection=Get-Content -LiteralPath selection.json -Raw|ConvertFrom-Json
           $target=$selection.targets|Where-Object {$_.unitId -eq $env:UNIT -and $_.channelId -eq $env:CHANNEL}
           $native=Get-Content -LiteralPath native.json -Raw|ConvertFrom-Json
@@ -925,7 +925,7 @@ jobs:
           UNIT: ${{ matrix.unitId }}
           CHANNEL: ${{ matrix.channelId }}
         run: |
-          
+
           $selection=Get-Content -LiteralPath selection.json -Raw|ConvertFrom-Json
           $target=$selection.targets|Where-Object {$_.unitId -eq $env:UNIT -and $_.channelId -eq $env:CHANNEL}
           $native=Get-Content -LiteralPath native.json -Raw|ConvertFrom-Json
@@ -1025,7 +1025,7 @@ jobs:
         env:
           MODE: verify
         run: |
-          
+
           $ErrorActionPreference='Stop'
           $manifest=Get-Content -LiteralPath manifest.json -Raw|ConvertFrom-Json
           $version=$manifest.version
@@ -1081,7 +1081,7 @@ jobs:
           UNIT: ${{ matrix.unitId }}
           CHANNEL: ${{ matrix.channelId }}
         run: |
-          
+
           $selection=Get-Content -LiteralPath selection.json -Raw|ConvertFrom-Json
           $target=$selection.targets|Where-Object {$_.unitId -eq $env:UNIT -and $_.channelId -eq $env:CHANNEL}
           $native=Get-Content -LiteralPath native.json -Raw|ConvertFrom-Json
@@ -1445,7 +1445,7 @@ jobs:
           UNIT: ${{ matrix.unitId }}
           CHANNEL: ${{ matrix.channelId }}
         run: |
-          
+
           $selection=Get-Content -LiteralPath selection.json -Raw|ConvertFrom-Json
           $target=$selection.targets|Where-Object {$_.unitId -eq $env:UNIT -and $_.channelId -eq $env:CHANNEL}
           $native=Get-Content -LiteralPath native.json -Raw|ConvertFrom-Json

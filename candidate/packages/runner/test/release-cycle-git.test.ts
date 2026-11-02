@@ -1,4 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
+import { releaseProtectionFixture } from './fixtures/release-protection.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
@@ -67,8 +68,7 @@ it('publishes seven bytesets, waits for both channels, recovers protected consum
   const io={request:async(method:string,path:string)=>{
     expect(method).toBe('GET');
     if(path.endsWith('/product'))return response({id:1,full_name:'fixture/product',default_branch:'main',archived:false,disabled:false});
-    if(path.includes('/rules/branches/'))return response(['creation','update','deletion'].map(type=>({type,ruleset_id:9})));
-    if(path.endsWith('/rulesets/9'))return response({id:9,enforcement:'active',target:'branch',bypass_actors:[{actor_type:'Integration',actor_id:4243096,bypass_mode:'always'}]});
+    if(releaseProtectionFixture(path))return response(releaseProtectionFixture(path));
     if(path.endsWith('/git/ref/heads/steward/release-state'))return response({object:{sha:await git('-C',remote,'rev-parse','refs/heads/steward/release-state')}});
     if(path.includes('/git/blobs/')){const content=await git('-C',remote,'cat-file','blob',path.split('/').at(-1)!);return response({content:Buffer.from(content+'\n').toString('base64')});}
     if(path.includes('/commits/')&&path.includes('/pulls'))return response([pr]);
@@ -91,7 +91,7 @@ it('publishes seven bytesets, waits for both channels, recovers protected consum
   }};
   const centralRun={id:900,repository:{id:1296724484},head_repository:{id:1296724484},workflow_id:20,path:'.github/workflows/release.yml',event:'schedule',head_sha:C,head_branch:'main',actor:{id:81},triggering_actor:{id:81},run_attempt:1,status:'in_progress',conclusion:null as string|null,created_at:NOW,updated_at:NOW,display_title:'Release'};
   const centralJob={id:901,run_id:900,run_attempt:1,head_sha:C,name:'release-coordinator',status:'in_progress',conclusion:null as string|null,started_at:NOW,completed_at:null as string|null,steps:[{number:3,name:'business-release-coordinator',started_at:NOW,completed_at:null as string|null,conclusion:null as string|null}]};
-  const centralIo={request:async(method:string,path:string)=>{expect(method).toBe('GET');if(path.endsWith('/steward/'))return response({id:1296724484,full_name:'splrad/steward',default_branch:'main',archived:false,disabled:false});if(path.includes('/workflows/20'))return response({id:20,path:centralRun.path});if(path.includes('/jobs?'))return response({total_count:1,jobs:[centralJob]});return response(centralRun);}};
+  const centralIo={request:async(method:string,path:string)=>{expect(method).toBe('GET');if(path.endsWith('/steward'))return response({id:1296724484,full_name:'splrad/steward',default_branch:'main',archived:false,disabled:false});if(path.includes('/workflows/20'))return response({id:20,path:centralRun.path});if(path.includes('/jobs?'))return response({total_count:1,jobs:[centralJob]});return response(centralRun);}};
   const options={io,centralIo,now:()=>now,centralInvocation:{runId:900,runAttempt:1,controllerSha:C,defaultBranch:'main'}};
   f.state.loseUpload=f.state.loseBody=f.state.losePublish=true;
   const published=await releaseCommand('publish',input,{...options,publisher:async()=>{
