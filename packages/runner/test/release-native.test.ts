@@ -106,4 +106,4 @@ it.skipIf(process.platform !== 'win32')('classifies successful malformed output 
   const error = await nativeReleaseInspector(script, root).inspectPath!('fixture.zip').catch(e => e);
   expect(error).not.toBeInstanceOf(BuildContractError); expect(error.code).toBe(3);
  } finally { await rm(root, {recursive:true}); }
-});
+}, 30_000); // Two real PowerShell launches can exceed five seconds on hosted Windows.
