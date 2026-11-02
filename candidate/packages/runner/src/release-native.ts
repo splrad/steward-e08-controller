@@ -1,4 +1,5 @@
-import { readFile, stat } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { BuildContractError, decodeBuildJson } from '../../core/src/build-manifest.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -10,8 +11,22 @@ export function nativeReleaseInspector(script: string, home: string, platform: N
   const inspect: NativeVersionInspector = async () => { throw new Error('RN_NATIVE_PATH_REQUIRED'); };
   inspect.inspectPath = async path => {
     if (/[\\/]package\.json$/.test(path)) {
-      if ((await stat(path)).size > 512 * 1024) throw new BuildContractError('RN_BUILD_LIMIT');
-      const metadata = decodeBuildJson(await readFile(path)) as any;
+      const limit = 512 * 1024;
+      const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+      let bytes: Buffer;
+      try {
+        const info = await handle.stat();
+        if (!info.isFile() || info.nlink !== 1 || info.size > limit) throw new BuildContractError('RN_BUILD_LIMIT');
+        const buffer = Buffer.alloc(limit + 1); let size = 0;
+        while (size < buffer.length) {
+          const read = await handle.read(buffer, size, buffer.length - size, size);
+          if (read.bytesRead === 0) break;
+          size += read.bytesRead;
+        }
+        if (size > limit) throw new BuildContractError('RN_BUILD_LIMIT');
+        bytes = buffer.subarray(0, size);
+      } finally { await handle.close(); }
+      const metadata = decodeBuildJson(bytes) as any;
       if (!metadata || typeof metadata.name !== 'string' || typeof metadata.version !== 'string') throw new BuildContractError('RN_BUILD_VERSION');
       return metadata.version;
     }

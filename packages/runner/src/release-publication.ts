@@ -62,9 +62,13 @@ async function objects(context:EvidenceContext,io:EvidenceTransport):Promise<Nat
       proof.digest=hash(JSON.stringify([stableReleaseFacts(release),bytes.sort((a,b)=>Number(a[0])-Number(b[0]))]));
       proof.status=release.draft===false&&release.immutable===true&&assets.length===unit.assets.length?'MATCH':'ABSENT';
     }catch(error) {
-      if(error instanceof EvidenceReadError&&error.status===404) {
-        try {const all=await reader.pages('releases','');if(!all.some(r=>r.tag_name===unit.tag||r.id===unit.releaseId))proof.status=(unit.releaseId===null?'ABSENT':'CONFLICT');}catch{ /* Incomplete visibility is unknown. */ }
-      }else if(error instanceof Error&&error.message.startsWith('NATIVE_PUBLICATION:'))proof.status='CONFLICT';
+      if (error instanceof EvidenceReadError && error.status === 404) {
+        try {
+          const all = await reader.pages('releases','');
+          if (!all.some(r => r.tag_name === unit.tag || r.id === unit.releaseId))
+            proof.status = unit.releaseId === null ? 'ABSENT' : 'CONFLICT';
+        } catch { /* Incomplete visibility is unknown. */ }
+      } else if (error instanceof Error && error.message.startsWith('NATIVE_PUBLICATION:')) proof.status = 'CONFLICT';
     }
     result.push(proof);
   }
