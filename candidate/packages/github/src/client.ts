@@ -1,5 +1,6 @@
 import {Octokit} from '@octokit/rest';
 import {GITHUB_API_VERSION} from './api-version.js';
+import {completeMergedPull} from './merged-pull.js';
 /** Read-only adapters for current-head Copilot evidence and frozen release-source readers. */
 export class GitHubClient {
   private readonly native:Octokit;
@@ -65,7 +66,9 @@ export class GitHubClient {
 
 
   getRepositoryById(id:number){return this.request<any>('GET',`/repositories/${id}`);}
-  getPullRequest(owner:string,repo:string,number:number){return this.request<any>('GET',`/repos/${owner}/${repo}/pulls/${number}`);}
+  async getPullRequest(owner:string,repo:string,number:number){
+    return completeMergedPull(`${owner}/${repo}`,number,await this.request<any>('GET',`/repos/${owner}/${repo}/pulls/${number}`),()=>this.listIssueEvents(owner,repo,number));
+  }
   getRequestedReviewers(owner:string,repo:string,number:number){return this.request<any>('GET',`/repos/${owner}/${repo}/pulls/${number}/requested_reviewers`);}
   listPullRequestReviews(owner:string,repo:string,number:number){return this.paginate<any>(`/repos/${owner}/${repo}/pulls/${number}/reviews?per_page=100`);}
   listIssueEvents(owner:string,repo:string,number:number){return this.paginate<any>(`/repos/${owner}/${repo}/issues/${number}/events?per_page=100`);}
@@ -86,5 +89,9 @@ export class GitHubClient {
   listPullCommits(owner: string, repo: string, number: number) { return this.paginate<any>(`/repos/${owner}/${repo}/pulls/${number}/commits?per_page=100`); }
   listLabels(owner: string, repo: string, number: number) { return this.paginate<any>(`/repos/${owner}/${repo}/issues/${number}/labels?per_page=100`); }
   listReleases(owner: string, repo: string) { return this.paginate<any>(`/repos/${owner}/${repo}/releases?per_page=100`); }
-  listPullsForCommit(owner: string, repo: string, sha: string) { return this.paginate<any>(`/repos/${owner}/${repo}/commits/${sha}/pulls?per_page=100`); }
+  async listPullsForCommit(owner: string, repo: string, sha: string) {
+    const pulls=await this.paginate<any>(`/repos/${owner}/${repo}/commits/${sha}/pulls?per_page=100`), completed=[];
+    for(const pull of pulls)completed.push(await completeMergedPull(`${owner}/${repo}`,pull.number,pull,()=>this.listIssueEvents(owner,repo,pull.number)));
+    return completed;
+  }
 }

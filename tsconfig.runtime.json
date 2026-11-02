@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2023",
+      "WebWorker"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": [
+      "node"
+    ],
+    "exactOptionalPropertyTypes": false
+  },
+  "include": [
+    "packages/runtime/src/**/*.ts"
+  ],
+  "exclude": [
+    "packages/runner/dist/**"
+  ]
+}

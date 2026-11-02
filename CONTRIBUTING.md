@@ -1,0 +1,56 @@
+# 为 SPLRAD Steward 做贡献
+
+SPLRAD Steward 是组织的共享自动化服务，不是通用的 GitHub 自动化产品。贡献应当针对现有 Steward 工作流、配置契约、验证规则或运行问题。
+
+修改代码前，请阅读受影响的配置、Schema、工作流和测试。项目专用行为应保留在仓库配置中，不要在中央工作流中加入临时判断。
+
+## 本地环境与检查
+
+Steward 使用 `mise.toml`、`mise.lock` 及 `.mise/locks/` 统一管理 Node.js、npm 和验证工具。
+
+```powershell
+$env:MISE_SAFE = '1'
+$env:MISE_NODE_COMPILE = 'false'
+mise install --locked
+if ($LASTEXITCODE -ne 0) { throw '工具安装失败' }
+mise exec -- npm ci --ignore-scripts
+if ($LASTEXITCODE -ne 0) { throw '依赖安装失败' }
+mise exec -- npm run build
+if ($LASTEXITCODE -ne 0) { throw '构建失败' }
+mise exec -- npm run verify
+if ($LASTEXITCODE -ne 0) { throw '验证失败' }
+```
+
+`npm run verify` 会运行仓库测试、类型检查、配置验证、生成文件验证和工作流验证。针对性改动可以只运行相关检查，但要在 Pull Request 中说明未运行的项目。
+
+修改 `packages/runner/src/index.ts` 或其依赖后，必须重建已提交的运行时文件。运行 `npm run build`，再确认 `npm run verify:dist` 通过。
+
+## Pull Request
+
+使用短期分支，并让一个 Pull Request 只处理一个问题。不要混入无关格式化、生成文件噪声、凭据、私有路径、客户数据或运行时密钥。
+
+同仓和 fork 贡献都由贡献者在准备好后显式创建 PR。推送工作分支用于保存和分享修改，不会自动创建 PR，也不会自动改写已有 PR 的标题或正文。
+
+草稿准备好后，在 PR 页面点击 **Ready for review**。PR 作者或拥有目标仓库 Write 及以上权限的用户均可操作，适用于同仓和 fork PR。机器人创建的 PR 可由具备上述仓库权限的用户操作；fork PR 作者无需上游 Write 权限。Ready 仅表示提交审查，检查、批准和人工合并仍须分别完成。
+
+组织的 [Pull Request 模板](https://github.com/splrad/.github/blob/main/.github/pull_request_template.md)由 `splrad/.github` 维护。请在 PR 正文写明修改目的及验证结果，后续直接更新正文。按需手动关联议题：确认完整解决时使用 `Closes #编号`，部分相关时使用普通编号或链接。Steward 不自动推断、增加、移除或维护议题关联。
+
+合并前需满足组织的 CI、线程解决和审批规则。普通贡献者的 PR 需要作者之外、有相应权限的真人批准；个人审批例外以线上规则为准，不能把本说明视为已生效的权限。新提交后应重新检查审批状态。
+
+发现疑似安全问题时，请遵循仓库安全政策，不要在公开 Pull Request 中报告。
+
+## 实现与验证依据
+
+发布周期的纯状态转换、来源、版本和字节校验位于 core；网络、环境变量、当前时间和供应商调用由 runner 或官方 SDK 边界提供，测试显式传入观察与时间。以当前实际模块为准，不恢复已退役的通用授权和执行框架。
+
+runner 由仓库受审构建入口生成。npm run verify:dist 重建并逐字节比较 packages/runner/dist/index.js；检查证据必须对应当前目标提交。产物一致不代替行为、权限和配置验证。
+
+外部写入使用任务所需的最小权限和准确对象。审查评论、检查通过与合并、发布授权分别记录；自动化仅执行已经启用的职责。
+
+## 提交变更与审查
+
+贡献者或已获授权的助手通过 GitHub 原生功能创建或更新普通 PR。提交、推送、创建 PR、Ready for review、批准和合并按各自授权执行；已有对应 PR 时继续使用原 PR。
+
+PR 标题和正文由作者维护，说明实际问题、变更、验证、影响与恢复方式。完整解决事项使用原生 Closes 关联；人工补充内容保留。
+
+Copilot、Codex 和 Code Quality 的意见须结合当前代码、合同与验证独立判断。已证实且已修复的意见按原线程说明证据；不确定、冲突或仅因 head 变化而过时的意见不能当作已经解决。审查意见、CI 通过和维护者批准分别成立。

@@ -87,6 +87,25 @@ it('preflight authentication and quota waits spend no model calls', async () => 
     expect(await resumeContentBatches(work, {}, r.port)).toEqual({ status, calls: 0 }); expect(work.input.batches[0]!.attempts).toHaveLength(0);
   }
 });
+it('resumes the same partially generated input after credential recovery without repeating archived calls', async () => {
+  const work = await planContentBatches(input(), [source(1, 'CONTEXT'), source(2)]), cache: ContentCache = {}, r = runtime();
+  let available = true;
+  const call = r.port.call;
+  r.port.preflight = async () => available ? 'READY' : 'WAIT_AUTH';
+  r.port.call = async text => { const response = await call(text); available = false; return response; };
+  expect(await resumeContentBatches(work, cache, r.port)).toEqual({ status: 'WAIT_AUTH', calls: 1 });
+  const first = structuredClone(work.input.batches[0]!);
+  const cached = structuredClone(cache);
+  expect(first.attempts[0]!.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
+  expect(await resumeContentBatches(work, cache, r.port)).toEqual({ status: 'WAIT_AUTH', calls: 0 });
+  expect(cache).toEqual(cached);
+  expect(work.input.batches[0]).toEqual(first);
+  available = true; r.port.call = call;
+  expect(await resumeContentBatches(work, cache, r.port)).toEqual({ status: 'READY', calls: 2 });
+  expect(work.input.batches[0]).toEqual(first);
+  expect(r.requests.map(text => JSON.parse(text).stage)).toEqual(['CONTEXT', 'DIFF', 'COMPOSE']);
+  expect(await resumeContentBatches(work, cache, r.port)).toEqual({ status: 'READY', calls: 0 });
+});
 it('limits one wake to ten calls and eighteen minutes without dropping remaining work', async () => {
   const sources = Array.from({ length: 40 }, (_, i) => ({ ...source(i), text: '中'.repeat(2000) }));
   const work = await planContentBatches(input(), sources), r = runtime();

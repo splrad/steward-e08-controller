@@ -5,7 +5,7 @@ import { it, expect, afterEach, vi } from 'vitest';
 import { discoverWorkflowFiles, scanWorkflows } from '../src/workflow-tools.js';
 import YAML from 'yaml';
 
-const state = vi.hoisted(() => ({ missing: false, calls: [] as { command: string; args: string[]; env: Record<string, string> }[] }));
+const state = vi.hoisted(() => ({ missing: false, extraEntry: 'none', calls: [] as { command: string; args: string[]; env: Record<string, string> }[] }));
 // This integration file permits only mise's read-only lookup and the offline
 // scanners and their version checks from the batch's installed tool directory. All other subprocesses fail.
 vi.mock('node:child_process', async importOriginal => {
@@ -20,12 +20,21 @@ vi.mock('node:child_process', async importOriginal => {
       && /(?:jactionlint|zizmor|shellcheck|pyflakes|python(?:\d+(?:\.\d+)*)?)(?:\.exe)?$/.test(command)
       && (args[0] === '--profile' || args[0] === '--version' || args[0] === '--offline');
     if (!lookup && !scanner) throw new Error('TEST_SUBPROCESS_DENIED');
-    return native.spawnSync(command, args, options);
+    const result = native.spawnSync(command, args, options);
+    if (command === 'mise' && args[0] === 'ls' && state.extraEntry !== 'none' && result.status === 0) {
+      const inventory = JSON.parse(result.stdout as string);
+      for (const entries of Object.values(inventory) as any[][]) {
+        const active = entries.find(entry => entry.active === true);
+        if (active) entries.push({ ...active, active: state.extraEntry === 'active', source: undefined });
+      }
+      return { ...result, stdout: JSON.stringify(inventory) };
+    }
+    return result;
   } };
 });
 const roots: string[] = [];
 afterEach(async () => {
-  state.missing = false; state.calls.length = 0;
+  state.missing = false; state.extraEntry = 'none'; state.calls.length = 0; vi.unstubAllEnvs();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 const clean = `name: Test\non: pull_request\npermissions:\n  contents: read\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo safe\n`;
@@ -41,6 +50,15 @@ it('executes both locked tools without candidate configuration or credentials', 
   expect(state.calls.some(call => call.args[0] === '--offline')).toBe(true);
   expect(state.calls.every(call => !Object.keys(call.env).some(name => /TOKEN|SECRET|PRIVATE_KEY/.test(name)))).toBe(true);
   expect(state.calls.every(call => !call.args.includes('-ignore'))).toBe(true);
+}, 120000);
+it('binds native lock graph trust to the policy and ignores only inactive installations', async () => {
+  const root = await fixture(clean);
+  vi.stubEnv('MISE_TRUSTED_CONFIG_PATHS', root);
+  state.extraEntry = 'inactive';
+  await expect(scanWorkflows(root, ['.github/workflows/test.yml'])).resolves.toMatchObject({ results: [{status:0},{status:0}] });
+  expect(state.calls.every(call => call.env.MISE_TRUSTED_CONFIG_PATHS === resolve('.'))).toBe(true);
+  state.extraEntry = 'active';
+  await expect(scanWorkflows(root, ['.github/workflows/test.yml'])).rejects.toThrow('provision the trusted mise lock');
 }, 120000);
 it.each(['single', 'max'])('accepts native queue %s and workflow source contexts at both levels', async queue => {
   const d = YAML.parse(clean);

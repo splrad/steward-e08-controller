@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -9,6 +9,7 @@ import { nativeReleaseApp, nativeEvidenceTransport, isolatedBuildEnvironment } f
 import { readReleaseRecords, writeReleaseRecords, releaseCommand, assertReleaseWriterProtection } from './release-record.mjs';
 import {serviceMaintenance,maintenanceGitStore} from './maintenance.mjs';
 import {servicePages,pagesGitStore} from './pages-maintenance.mjs';
+import {assertQualityProtection,qualityNativeIO} from './quality-language-summary.mjs';
 
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const identity={name:'splrad-steward[bot]',email:'301115370+splrad-steward[bot]@users.noreply.github.com'};
@@ -77,9 +78,10 @@ export async function coordinateReleaseWake({discover,observe,service,health,mai
   await health(summary);return summary;
 }
 
-async function fetchState(root,repository,token,targetRef='steward/release-state') {
-  const io=nativeEvidenceTransport(token),remote=`https://github.com/${repository.full_name}.git`;
-  await assertReleaseWriterProtection(repository.full_name,targetRef,io);
+export async function fetchState(root,repository,token,targetRef='steward/release-state',{governanceAppId,fetcher=fetch}={}) {
+  const io=nativeEvidenceTransport(token,fetcher),remote=`https://github.com/${repository.full_name}.git`;
+  if(targetRef==='steward/governance-state')await assertQualityProtection(qualityNativeIO(repository.full_name,token,fetcher),repository.full_name,governanceAppId);
+  else await assertReleaseWriterProtection(repository.full_name,targetRef,io,{token,fetcher});
   const response=await io.request('GET',`/repos/${repository.full_name}/git/ref/heads/${targetRef}`);
   if(response.status!==200)throw new Error(response.status===404?'RELEASE_BOOTSTRAP_REQUIRED':'RELEASE_STATE_UNAVAILABLE');
   const ref=JSON.parse(Buffer.from(response.bytes).toString('utf8'));
@@ -125,8 +127,9 @@ export async function main() {
           coordinator:{runId:Number(process.env.GITHUB_RUN_ID),runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),controllerSha}});
       }),discover:()=>app.discover(),
       pages:repository=>app.forPagesRepository(repository.id,async token=>{
+        const {governanceAppId}=JSON.parse(await readFile(new URL('../config/review/quality-language.json',import.meta.url),'utf8'));
         const writeDirectory=await mkdtemp(join(root,'pages-writes-'));
-        const store=pagesGitStore({repositoryId:repository.id,refresh:()=>fetchState(root,repository,token,'steward/governance-state'),
+        const store=pagesGitStore({repositoryId:repository.id,refresh:()=>fetchState(root,repository,token,'steward/governance-state',{governanceAppId}),
           writeDirectory,defaultBranch:repository.default_branch,token,identity});
         return servicePages({io:nativeEvidenceTransport(token),repository,store,appBotId:app.appBotId,token,
           coordinator:{runId:Number(process.env.GITHUB_RUN_ID),runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),controllerSha}});

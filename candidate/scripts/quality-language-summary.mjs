@@ -20,7 +20,7 @@ export function qualityNativeIO(repository,token,transport=fetch) {
   check(/^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(repository)&&token,'TARGET');
   const root=`/repos/${repository}`,client=new Octokit({auth:token,log:{debug(){},info(){},warn(){},error(){}},request:{fetch:transport,headers:{'x-github-api-version':'2026-03-10'}}});
   client.hook.before('request',options=>{options.headers['x-github-api-version']='2026-03-10';});
-  const allowed=path=>typeof path==='string'&&path.startsWith(root+'/')&&!path.includes('..')&&!path.includes('#')&&!path.includes('\\');
+  const allowed=path=>typeof path==='string'&&(path===root||path.startsWith(root+'/'))&&!path.includes('..')&&!path.includes('#')&&!path.includes('\\');
   return {async get(path){
     check(allowed(path),'READ_PATH');const response=await client.request(`GET ${path}`,{request:{signal:AbortSignal.timeout(60_000)}});
     const value=/\/rulesets\/\d+$/.test(path)?await completeNativeRuleParameters(client,response.data):response.data;

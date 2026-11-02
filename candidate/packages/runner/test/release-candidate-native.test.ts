@@ -11,6 +11,7 @@ import { generateCandidate } from '../src/release-candidate-update.js';
 import { GitHub } from 'release-please/build/src/github.js';
 import { FileNotFoundError } from 'release-please/build/src/errors/index.js';
 import { setLogger } from 'release-please/build/src/util/logger.js';
+import { releaseProtectionFixture } from './fixtures/release-protection.js';
 
 // This scenario includes many durable state commits and five independent wakes, including merged-source handoff.
 // Individual production Git operations retain their existing 30/60/90 second bounds.
@@ -46,8 +47,7 @@ it('runs the native candidate adapter through protected state, real Git, upstrea
     requests.push({ method, path, body }); expect(url.origin).toBe('https://api.github.com'); let value: any;
     if (path.includes('/git/ref/heads/')) { const branch = path.split('/git/ref/heads/')[1]!, sha = await head(branch); if (!sha) return new Response('{}', { status: 404 }); value = { ref: `refs/heads/${branch}`, object: { sha, type: 'commit' } }; }
     else if (path.endsWith('/rules/branches/main')) value = [{ type: 'non_fast_forward' }, { type: 'deletion' }];
-    else if (path.endsWith('/rules/branches/steward/release-state')) value = ['creation', 'update', 'deletion'].map(type => ({ type, ruleset_id: 5 }));
-    else if (path.endsWith('/rulesets/5')) value = { id: 5, target: 'branch', enforcement: 'active', bypass_actors: [{ actor_type: 'Integration', actor_id: 4243096, bypass_mode: 'always' }] };
+    else if (releaseProtectionFixture(path)) value = releaseProtectionFixture(path);
     else if (path.endsWith('/rulesets/6')) value = { id: 6, target: 'tag', enforcement: 'active', conditions: { ref_name: { include: ['~ALL'], exclude: [] } }, rules: [{ type: 'deletion' }, { type: 'non_fast_forward' }] };
     else if (path.endsWith('/rulesets')) value = [{ id: 6, target: 'tag', enforcement: 'active' }];
     else if (path.endsWith('/releases') || path.endsWith('/tags')) value = [];
@@ -57,6 +57,8 @@ it('runs the native candidate adapter through protected state, real Git, upstrea
       throw new Error('accepted create response lost');
     } else if (path.endsWith('/pulls')) { if (pr) pr.head.sha = await head(pr.head.ref); value = pr && (url.searchParams.get('state') !== 'open' || pr.state === 'open') ? [pr] : []; }
     else if (path.endsWith('/pulls/9')) value = pr;
+    else if (path.endsWith('/issues/9/events')) value = [{ id: 12, event: 'merged', url: 'https://api.github.com/repos/fixture/product/issues/events/12',
+      commit_id: await head('main'), commit_url: `https://api.github.com/repos/fixture/product/commits/${await head('main')}`, actor: { id: 7 }, created_at: '2026-10-27T00:00:01Z' }];
     else if (/\/commits\/[a-f0-9]{40}$/.test(path)) value = { sha: path.split('/').at(-1), author: { id: 42, login: 'contributor' }, committer: { id: 7, login: 'author' } };
     else if (path.startsWith('/users/')) { const login = path.split('/').at(-1)!; value = { id: login === 'author' ? 7 : 42, login, type: 'User', html_url: `https://github.com/${login}`, avatar_url: `https://avatars.githubusercontent.com/u/${login === 'author' ? 7 : 42}` }; }
     else if (path.endsWith('/issues/9/comments') && method === 'GET') value = comments;
@@ -93,11 +95,19 @@ it('runs the native candidate adapter through protected state, real Git, upstrea
   expect(modelCalls).toBe(firstCalls); expect(await head('steward/release-candidate')).toBe(firstHead); await refresh();
   const state = await readReleaseRecords({ directory, targetRef: 'steward/release-state', repositoryId: 1 });
   expect(state.repository.candidate.editingAckHead).toBe(firstHead); expect(state.repository.candidate.prNumber).toBe(9);
+  await git('fetch', '--no-tags', '--no-recurse-submodules', remote, 'refs/heads/steward/release-candidate');
+  await git('switch', '-c', 'reviewed-notes', 'FETCH_HEAD');
+  const reviewedNotes = (await git('show', 'HEAD:.release-notes/app.md')).replace('## 概述', '## 概述\n\n人工审核说明。').replace(/\n/g, '\r\n') + '\r\n';
+  await writeFile(join(directory, '.release-notes/app.md'), reviewedNotes);
+  await git('add', '--', '.release-notes/app.md'); await git('commit', '--signoff', '-m', 'docs: review candidate notes');
+  const humanHead = await git('rev-parse', 'HEAD'); await git('push', '--porcelain', remote, 'HEAD:refs/heads/steward/release-candidate');
+  pr.head.sha = humanHead; await git('switch', 'main');
   pr.labels = []; pr.state = 'closed';
   expect(await nativeReleaseCandidate({ ...request, writeDirectory: join(root, 'closed-writes') }, options)).toMatchObject({ reason: 'CLOSED_PR' });
   pr.state = 'open';
   expect(await nativeReleaseCandidate({ ...request, writeDirectory: join(root, 'reopened-writes') }, options)).toMatchObject({ status: 'READY', prNumber: 9 });
-  expect(await head('steward/release-candidate')).toBe(firstHead); expect(modelCalls).toBe(firstCalls);
+  expect(await head('steward/release-candidate')).toBe(humanHead); expect(modelCalls).toBe(firstCalls);
+  expect(await git('show', `${humanHead}:.release-notes/app.md`)).toBe(reviewedNotes.trim());
   expect(requests.filter(r => /\/commits\/|\/users\//.test(r.path))).toHaveLength(identityCalls);
   expect(comments[0].body).toContain('github.com&#x2F;contributor'); expect(comments[0].body).not.toContain('github.com&#x2F;author');
   expect(pr.title).toBe('人工修改标题'); expect(pr.body).toBe('人工修改正文');
@@ -106,7 +116,8 @@ it('runs the native candidate adapter through protected state, real Git, upstrea
   await refresh();
   await git('fetch', '--no-tags', '--no-recurse-submodules', remote, 'refs/heads/steward/release-candidate');
   await git('merge', '--ff-only', 'FETCH_HEAD'); await git('push', '--porcelain', remote, 'HEAD:refs/heads/main');
-  const S = await git('rev-parse', 'HEAD'); pr.state = 'closed'; pr.merged = true; pr.merge_commit_sha = S;
+  const S = await git('rev-parse', 'HEAD'); pr.state = 'closed'; pr.merged = true; pr.merged_at = '2026-10-27T00:00:00Z';
+  pr.url = 'https://api.github.com/repos/fixture/product/pulls/9'; pr.base.repo.full_name = 'fixture/product';
   const readsBeforeMerge = requests.length;
   expect(await nativeReleaseCandidate({ ...request, writeDirectory: join(root, 'merge-writes') }, options)).toMatchObject({ status: 'CYCLE_READY', sourceSha: S, cycleId: `pr-9-${S}` });
   expect(modelCalls).toBe(firstCalls); await refresh();

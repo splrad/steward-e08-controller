@@ -40,6 +40,13 @@ it('business waits for native canonical binding while source check remains indep
   expect(await pipelineChannelIdentity(f.inputs,f.input.state,f.environment,f.gh,f.io)).toEqual({status:'NOT_BOUND',reason:'NATIVE_BINDING_PENDING'});
   f.request.canonicalRunId=101;f.request.nativeResponseEvidencePath='evidence/dispatch/'+D+'.json';expect(await pipelineChannelIdentity(f.inputs,f.input.state,f.environment,f.gh,f.io)).toEqual({status:'REJECTED',reason:'NON_CANONICAL_RUN'});
 });
+it('records native R drift before an unrelated state append, while unchanged R still requires the original state head',async()=>{
+  const f=fixture('submit'),original=f.io.request;
+  const io={request:async(method:string,path:string)=>path.endsWith('/release-state')?f.response({object:{sha:'e'.repeat(40)}}):original(method,path)};
+  expect(await pipelineChannelIdentity(f.inputs,f.input.state,f.environment,f.gh,io,'source')).toEqual({status:'UNKNOWN',reason:'STATE_SOURCE_MOVED'});
+  f.run.head_sha='f'.repeat(40);
+  expect(await pipelineChannelIdentity(f.inputs,f.input.state,f.environment,f.gh,io,'source')).toEqual({status:'REJECTED',reason:'SOURCE_REF_MOVED'});
+});
 it.each(['moved','human','source','targets','input','branch','controller'])('rejects %s channel source before any business or secret use',async kind=>{
   const f=fixture();
   if(kind==='moved')f.run.head_sha='f'.repeat(40);

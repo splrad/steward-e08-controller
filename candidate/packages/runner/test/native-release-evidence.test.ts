@@ -23,12 +23,44 @@ it('permits native created-time ranges in queries while rejecting encoded path t
     await expect(io.request('GET',bad)).rejects.toThrow('API path');
   expect(calls).toHaveLength(1);
 });
+it('reads the exact public native Run page without credentials or redirects and bounds its bytes',async()=>{
+  const calls:{url:string;init:any}[]=[];
+  const io=nativeEvidenceTransport('private-fixture-token',async(url:any,init:any)=>{
+    calls.push({url:String(url),init});return new Response('<html>native</html>',{headers:{'content-type':'text/html; charset=utf-8'}});
+  });
+  expect((await io.readRunPage!('example/product',100)).status).toBe(200);
+  expect(calls[0]!.url).toBe('https://github.com/example/product/actions/runs/100');
+  expect(new Headers(calls[0]!.init.headers).has('authorization')).toBe(false);expect(calls[0]!.init.redirect).toBe('error');
+  for(const repository of ['../product','example/..','example/product?token=x'])await expect(io.readRunPage!(repository,100)).rejects.toThrow('identity');
+  expect(calls).toHaveLength(1);
+  const big=nativeEvidenceTransport(undefined,async()=>new Response('x'.repeat(384*1024+1),{headers:{'content-type':'text/html'}}));
+  await expect(big.readRunPage!('example/product',100)).rejects.toThrow('bound');
+});
 
 it('reads every native attempt and counts actual failures once per wave from original logs',async()=>{
   const f=evidenceFixture(2),r=await inspectNativeCycle(f.context,[],f.io,NOW);
   expect(r.budget).toMatchObject({remaining:1,unknownEvidence:[],conflictEvidence:[]});expect(r.budget.failedWaveKeys).toHaveLength(2);
   expect(r.archives).toHaveLength(2);expect(r.archives[0]!.logs[0]!.digest).toMatch(/^[a-f0-9]{64}$/);
   expect(f.calls.some(call=>call.includes('/attempts/1/jobs'))).toBe(true);expect(f.calls.every(call=>call.startsWith('GET'))).toBe(true);
+});
+it('keeps timestamped skipped business steps out of native result collection and the failure budget',async()=>{
+  const f=evidenceFixture();
+  for(const job of f.jobs.get(1)!)for(const step of job.steps)if(step.name.startsWith('business-'))step.conclusion='skipped';
+  const result=await inspectNativeCycle(f.context,[],f.io,NOW);
+  expect(result.budget).toMatchObject({remaining:3,failedWaveKeys:[],unknownEvidence:[],conflictEvidence:[]});
+  expect(result.native.attempts[0]!.invocations).toEqual([]);
+  expect(f.calls.some(call=>call.endsWith('/logs'))).toBe(false);
+});
+it.each(['same-second','next-second'])('uses native second precision for %s receipts without replacing their precise completion time',async kind=>{
+  const f=evidenceFixture(),result=f.results.get(1)!;
+  result.execution.startedAt='2026-10-26T00:01:00.232Z';
+  result.execution.completedAt=kind==='same-second'?'2026-10-26T00:01:00.233Z':'2026-10-26T00:01:01.000Z';
+  result.execution.observedAt=result.execution.completedAt;
+  const actual=await inspectNativeCycle(f.context,[],f.io,NOW);
+  if(kind==='same-second'){
+    expect(actual.budget).toMatchObject({remaining:2,unknownEvidence:[],conflictEvidence:[]});
+    expect(actual.native.attempts[0]!.invocations[0]!.evidence.completedAt).toBe(result.execution.completedAt);
+  }else expect(actual.budget.remaining).toBeNull();
 });
 it('keeps raw retained job projections while counting their original business execution only once, including expiry',async()=>{
   const f=evidenceFixture(2);
@@ -101,6 +133,21 @@ it('archives and reads back before rerun and adopts a lost response by observing
   expect(f.calls.filter(call=>call.startsWith('POST'))).toEqual(['POST /repos/example/product/actions/runs/100/rerun-failed-jobs']);
   expect(f.calls.indexOf('ARCHIVE_READBACK')).toBeLessThan(f.calls.findIndex(call=>call.startsWith('POST')));
   expect(JSON.stringify(r)).not.toContain('secret-shaped');
+});
+it('compares latest and attempt metadata with their own endpoints while preserving original Run and attempt times',async()=>{
+  const f=evidenceFixture(2);f.runs.get(2).created_at='2026-10-26T00:00:01.000Z';f.setAccepted();const original=f.io.request;
+  f.io.request=async(method,path,...args)=>{
+    const response=await original(method,path,...args);
+    if(method==='GET'&&path==='/repos/example/product/actions/runs/100'){
+      const run=JSON.parse(Buffer.from(response.bytes).toString());run.created_at=f.runs.get(1).created_at;run.updated_at='2026-10-26T00:00:59.000Z';return f.response(run);
+    }
+    return response;
+  };
+  const result=await recoverNativeCycle(f.context,100,f.store,[],f.io,NOW);
+  expect(result.status).toBe('ACCEPTED');expect(result.observation.archives[0]!.run.updatedAt).toBe('2026-10-26T00:01:00.000Z');
+  expect(result.observation.latestRuns[0]!.updatedAt).toBe('2026-10-26T00:00:59.000Z');
+  expect(result.observation.archives[1]!.run.createdAt).toBe('2026-10-26T00:00:01.000Z');
+  expect(result.observation.latestRuns[0]!.createdAt).toBe('2026-10-26T00:00:00.000Z');
 });
 it.each(['unknown','missing-readback','changed-readback'])('does not rerun after %s archive write',async mode=>{
   const f=evidenceFixture();const original=f.store.archive;

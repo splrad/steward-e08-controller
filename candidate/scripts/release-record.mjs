@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { Octokit } from '@octokit/rest';
+import { completeNativeRuleParameters } from './native-rule-parameters.mjs';
 import { decodeReleaseRecord, decodeStateFile, stateRecordOwner, assertRepositoryWrite, isolatedBuildEnvironment, decodeBuildJson, assertMaintenanceProgress, assertPagesProgress,
   inspectNativeCycle, recoverNativeCycle, archiveFile, nativeReadFile, nativeEvidenceTransport,
   dispatchNativeRun, prepareBuildDispatch, prepareContinuation, verifyDispatchWorkflow, inspectPublications, invokePublication, inspectCycleHistory, completionFile, decodeCompletionArchive,
@@ -36,6 +38,13 @@ export async function readReleaseRecords({ directory, targetRef, repositoryId })
   // These plumbing reads never apply attributes, filters or text conversion.
   const git=async (...args)=>(await promisify(execFile)('git',['--no-replace-objects','--no-optional-locks','-c','core.hooksPath=','-c','core.fsmonitor=false',...args],
     {cwd:resolve(directory),env,encoding:'buffer',maxBuffer:16*1024*1024,timeout:30_000,windowsHide:true})).stdout;
+  // Git object IDs identify immutable bytes. Reuse the bytes within this read;
+  // still decode and validate every path and historical transition below.
+  const blobs=new Map();
+  const readBlob=async oid=>{
+    if(!blobs.has(oid))blobs.set(oid,await git('cat-file','blob',oid));
+    return blobs.get(oid);
+  };
   const ref=`refs/heads/${targetRef}`;
   try {
     if((await git('rev-parse','--is-shallow-repository')).toString().trim()!=='false')throw new Error('RELEASE_RECORD: incomplete history');
@@ -54,7 +63,7 @@ export async function readReleaseRecords({ directory, targetRef, repositoryId })
         if(commit===head)currentPaths.push(path);
         if(targetRef!=='steward/release-state') {
           if(mode!=='100644'||type!=='blob')throw new Error('RELEASE_RECORD: unsafe path');
-          const bytes=await git('cat-file','blob',oid);
+          const bytes=await readBlob(oid);
           const value=decodeStateFile(targetRef,path,bytes,repositoryId);
           if(path.startsWith('maintenance/pages/')&&domainRecords.has(path))assertPagesProgress(value,domainRecords.get(path).value);
           if(!domainRecords.has(path))domainRecords.set(path,{commit,path,blobSha:oid,value,content:bytes.toString('utf8')});
@@ -62,14 +71,14 @@ export async function readReleaseRecords({ directory, targetRef, repositoryId })
         }
         if(path.startsWith('evidence/native/')||path.startsWith('evidence/reads/')||path.startsWith('evidence/dispatch/')||path.startsWith('evidence/retry-limit/')||path.startsWith('evidence/publication/')||path.startsWith('evidence/completion/')||path.startsWith('evidence/channel/')||path.startsWith('evidence/channel-read/')||path.startsWith('evidence/normalized-delivery/')||path.startsWith('evidence/source-rejection/')) {
           if(mode!=='100644'||type!=='blob')throw new Error('RELEASE_RECORD: unsafe archive path');
-          const bytes=await git('cat-file','blob',oid), value=decodeStateFile(targetRef,path,bytes,repositoryId);
+          const bytes=await readBlob(oid), value=decodeStateFile(targetRef,path,bytes,repositoryId);
           if(!path.endsWith('/'+createHash('sha256').update(bytes).digest('hex')+'.json'))throw new Error('RELEASE_RECORD: archive digest');
           if(!domainRecords.has(path))domainRecords.set(path,{commit,path,blobSha:oid,value,content:bytes.toString('utf8')});
           history.push({commit,path,blobSha:oid,status:'DECODED'});continue;
         }
         if(path.startsWith('maintenance/')) {
           if(mode!=='100644'||type!=='blob')throw new Error('RELEASE_RECORD: unsafe maintenance path');
-          const bytes=await git('cat-file','blob',oid),value=decodeStateFile(targetRef,path,bytes,repositoryId);
+          const bytes=await readBlob(oid),value=decodeStateFile(targetRef,path,bytes,repositoryId);
           const previous=domainRecords.get(path);
           if(previous)assertMaintenanceProgress(value,previous.value);
           else domainRecords.set(path,{commit,path,blobSha:oid,value,content:bytes.toString('utf8')});
@@ -79,7 +88,7 @@ export async function readReleaseRecords({ directory, targetRef, repositoryId })
           if(mode!=='100644'||type!=='blob')throw new Error('RELEASE_RECORD: unsafe candidate path');
           const key=path+'\0'+oid;
           if(!candidateBlobs.has(key)) {
-            const bytes=await git('cat-file','blob',oid),value=decodeStateFile(targetRef,path,bytes,repositoryId);
+            const bytes=await readBlob(oid),value=decodeStateFile(targetRef,path,bytes,repositoryId);
             candidateBlobs.set(key,{value,content:bytes.toString('utf8')});
           }
           if(!domainRecords.has(path))domainRecords.set(path,{commit,path,blobSha:oid,...candidateBlobs.get(key)});
@@ -87,7 +96,7 @@ export async function readReleaseRecords({ directory, targetRef, repositoryId })
         }
         if(path!=='state.json'&&!path.startsWith('cycles/'))continue;
         if(mode!=='100644'||type!=='blob'||path!=='state.json'&&!/^cycles\/pr-[1-9][0-9]*-[a-f0-9]{40}\.json$/.test(path))throw new Error('RELEASE_RECORD: unsafe path');
-        const bytes=await git('cat-file','blob',oid);
+        const bytes=await readBlob(oid);
         // Unknown schema must not be bypassed by selecting a convenient older
         // supported version. Malformed bytes remain in history for recovery.
         let raw;try{raw=JSON.parse(bytes.toString('utf8'));}catch{history.push({commit,path,blobSha:oid,status:'MALFORMED_JSON'});continue;}
@@ -485,7 +494,7 @@ export async function inspectReleaseEvidence(request,{token,io=nativeEvidenceTra
 /** Persist exact frozen inputs or a native Release binding with the existing fast-forward writer. */
 async function adoptReleaseCycle(request,snapshot,cycle,{token,io},extraFiles=[]) {
   decodeReleaseRecord('cycle',Buffer.from(JSON.stringify(cycle)));
-  await assertReleaseWriterProtection(request.repository,'steward/release-state',io);
+  await assertReleaseWriterProtection(request.repository,'steward/release-state',io,{token});
   const path=`cycles/${cycle.id}.json`,content=JSON.stringify(cycle,null,2)+'\n';
   const home=await mkdtemp(join(tmpdir(),'steward-cycle-read-'));let previous;
   try {previous=(await promisify(execFile)('git',['--no-replace-objects','-c','core.hooksPath=','-C',request.directory,'show',`${snapshot.head}:${path}`],
@@ -568,16 +577,41 @@ export async function publishNativeCycle(request,{token,io=nativeEvidenceTranspo
   }finally{await rm(root,{recursive:true,force:true});}
 }
 
-export async function assertReleaseWriterProtection(repository,branch,io) {
+export async function assertReleaseWriterProtection(repository,branch,io,{token,fetcher=fetch}={}) {
+  const build=/^steward\/build\/[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch)&&!branch.includes('..');
+  if(!build&&!['steward/release-state','steward/automation-health'].includes(branch))fail('writer protection target');
   const native=async path=>{const response=await io.request('GET',`/repos/${repository}${path?'/'+path:''}`);if(response.status!==200)fail('writer protection read unavailable');return JSON.parse(Buffer.from(response.bytes).toString('utf8'));};
-    const rules=await native(`rules/branches/${encodeURIComponent(branch)}`);
-    if(!Array.isArray(rules)||!['creation','update','deletion'].every(type=>rules.some(rule=>rule.type===type&&Number.isSafeInteger(rule.ruleset_id))))fail('protected writer rules');
-    const ids=[...new Set(rules.filter(rule=>['creation','update','deletion'].includes(rule.type)).map(rule=>rule.ruleset_id))];
-    for(const id of ids) {
-      const rule=await native(`rulesets/${id}`);
-      if(rule.id!==id||rule.enforcement!=='active'||rule.target!=='branch'||!Array.isArray(rule.bypass_actors)||rule.bypass_actors.length!==1
-        ||rule.bypass_actors[0].actor_type!=='Integration'||rule.bypass_actors[0].actor_id!==4243096||rule.bypass_actors[0].bypass_mode!=='always')fail('single App writer required');
+  const rules=[];
+  for(let page=1;;page++) {
+    if(page>10000)fail('writer protection pagination');
+    const batch=await native(`rules/branches/${encodeURIComponent(branch)}?per_page=100&page=${page}`);
+    if(!Array.isArray(batch))fail('protected writer rules');rules.push(...batch);if(batch.length<100)break;
+  }
+  const required=build?['creation','update','deletion']:['creation','update','non_fast_forward','deletion'];
+  if(!required.every(type=>rules.some(rule=>rule.type===type&&Number.isSafeInteger(rule.ruleset_id))))fail('protected writer rules');
+  const relevant=rules.filter(rule=>['creation','update','non_fast_forward','deletion'].includes(rule.type));
+  let client;
+  for(const id of new Set(relevant.map(rule=>rule.ruleset_id))) {
+    if(!Number.isSafeInteger(id)||id<1)fail('protected writer rules');
+    let rule=await native(`rulesets/${id}`);
+    if(rule.id!==id||rule.enforcement!=='active'||rule.target!=='branch'||!Array.isArray(rule.bypass_actors)||!Array.isArray(rule.rules)
+      ||relevant.filter(value=>value.ruleset_id===id).some(value=>!rule.rules.some(item=>item.type===value.type)))fail('writer protection identity');
+    if(rule.rules.some(value=>value.type==='update'&&value.parameters===undefined)) {
+      if(!token)fail('writer update parameters unavailable');
+      client??=new Octokit({auth:token,log:{debug(){},info(){},warn(){},error(){}},request:{fetch:fetcher,timeout:60_000,headers:{'x-github-api-version':'2026-03-10'}}});
+      rule=await completeNativeRuleParameters(client,rule);
     }
+    // App creation/update authority and immutable history are separate native rulesets.
+    const types=rule.rules.map(value=>value.type);
+    if(types.includes('creation')||!build&&types.includes('update')) {
+      if(rule.bypass_actors.length!==1||rule.bypass_actors[0].actor_type!=='Integration'
+        ||rule.bypass_actors[0].actor_id!==4243096||rule.bypass_actors[0].bypass_mode!=='always')fail('single App writer required');
+    }
+    if(types.includes('deletion')||types.includes('non_fast_forward')||build&&types.includes('update')) {
+      if(rule.bypass_actors.length!==0)fail('writer integrity bypass');
+    }
+    if(rule.rules.some(value=>value.type==='update'&&value.parameters?.update_allows_fetch_and_merge!==false))fail('writer fetch and merge exception');
+  }
 }
 
 /** Fixed Git/native history reader. E05/E06 supply fresh source/channel observations through one trusted I/O boundary. */
@@ -638,7 +672,7 @@ export async function inspectRepositoryHistory(request,{token,io=nativeEvidenceT
   const prior=snapshot.history.find(record=>record.path==='state.json'&&record.status==='DECODED');
   const raw=await native(`git/blobs/${prior.blobSha}`),content=JSON.stringify(next,null,2)+'\n';
   changes.push({path:'state.json',content,sha256:sha256(content),previousSha256:sha256(Buffer.from(raw.content,'base64'))});
-  await assertReleaseWriterProtection(request.repository,'steward/release-state',io);
+  await assertReleaseWriterProtection(request.repository,'steward/release-state',io,{token});
   if((await native(`commits/${encodeURIComponent(request.defaultBranch)}`)).sha!==defaultHead||(await native('git/ref/heads/steward/release-state')).object?.sha!==snapshot.head)
     return {...history,result:'UNKNOWN',reason:'HISTORY_SOURCE_MOVED'};
   await mkdir(request.writeDirectory,{recursive:true});
@@ -692,13 +726,14 @@ export async function releaseCommand(command,request,{token,io=nativeEvidenceTra
   await verifyHead(snapshot.head);
   const actual=await native('');
   if(actual.id!==request.repositoryId||actual.full_name!==request.repository||actual.default_branch!==request.defaultBranch||actual.archived||actual.disabled)fail('native repository identity');
-  await assertReleaseWriterProtection(request.repository,'steward/release-state',io);
+  await assertReleaseWriterProtection(request.repository,'steward/release-state',io,{token});
   let dispatch=cycle.dispatches.filter(item=>command==='dispatch-build'?item.purpose==='build':item.purpose!=='build').at(-1);
   if(command==='dispatch-channel') {
     const context={repository:request.repository,repositoryId:request.repositoryId,appBotId:request.appBotId,cycle};
     await verifyContinuationReleases(context,io);
     if(!cycle.requiredChannels.length)return wait('NO_REQUIRED_CHANNELS');
-    const sourceFiles=await readChannelSourceRejections(context,snapshot.domainRecords.filter(record=>record.path.startsWith('evidence/source-rejection/')),io,now());
+    const sourceFiles=await readChannelSourceRejections(context,snapshot.domainRecords.filter(record=>record.path.startsWith('evidence/source-rejection/')),io,now(),
+      snapshot.domainRecords.filter(record=>record.path.startsWith('evidence/dispatch/')));
     if(sourceFiles.length) {const adopted=await adoptReleaseCycle({...request,directory},snapshot,cycle,{token,io},sourceFiles);snapshot=adopted.snapshot;directory=adopted.directory;}
     const reads=retainedChannelReads(context,snapshot,now()).reads,runs=[];
     for(const prior of cycle.dispatches.filter(value=>value.purpose!=='build'&&value.canonicalRunId!==null)) {
@@ -734,7 +769,7 @@ export async function releaseCommand(command,request,{token,io=nativeEvidenceTra
     cycle.dispatches.push(dispatch);
   }
   if(dispatch.canonicalRunId!==null)return {status:'BOUND',canonicalRunId:dispatch.canonicalRunId,reason:'CANONICAL_RUN_IMMUTABLE',publishInvoked:false};
-  if(dispatch.purpose==='build')await assertReleaseWriterProtection(request.repository,dispatch.ref,io);
+  if(dispatch.purpose==='build')await assertReleaseWriterProtection(request.repository,dispatch.ref,io,{token});
   // The workflow must already exist at the current default branch and at the frozen execution source.
   for(const ref of [request.defaultBranch,dispatch.executionSha]) {
     const file=await native(`contents/.github/workflows/steward-release-${dispatch.purpose==='build'?'publish':'channels'}.yml?ref=${encodeURIComponent(ref)}`);

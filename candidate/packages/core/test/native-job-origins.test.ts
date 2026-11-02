@@ -1,10 +1,16 @@
 import { expect, it } from 'vitest';
-import { nativeJobOrigins, originalJobExecutions } from '../src/native-job-origins.js';
+import { nativeJobOrigins, originalJobExecutions, withinNativeJobWindow } from '../src/native-job-origins.js';
 import type { NativeJob } from '../src/native-evidence.js';
 const job: NativeJob = {id:11,runId:42,runAttempt:1,headSha:'a'.repeat(40),name:'producer',status:'completed',conclusion:'success',
   startedAt:'2026-10-31T09:48:26.000Z',completedAt:'2026-10-31T09:48:30.000Z',steps:[{number:1,name:'business-build',
     startedAt:'2026-10-31T09:48:27.000Z',completedAt:'2026-10-31T09:48:29.000Z',conclusion:'success'}]};
 const copied = () => ({...structuredClone(job),id:21,runAttempt:2});
+it('accepts subsecond log receipts inside the native final second and rejects the next second',()=>{
+  expect(withinNativeJobWindow('2026-10-31T09:48:30.233Z',job.startedAt!,job.completedAt)).toBe(true);
+  expect(withinNativeJobWindow('2026-10-31T09:48:31.000Z',job.startedAt!,job.completedAt)).toBe(false);
+  expect(withinNativeJobWindow('2026-10-31T09:48:30.234Z',job.startedAt!,'2026-10-31T09:48:30.233Z')).toBe(false);
+  expect(withinNativeJobWindow('2026-10-31T09:48:25.999Z',job.startedAt!,job.completedAt)).toBe(false);
+});
 it('preserves original job and attempt through multiple new-ID projections without changing raw rows',()=>{
   const second=copied(),third={...copied(),id:31,runAttempt:3},attempts=[{attempt:1,jobs:[job]},{attempt:2,jobs:[second]},{attempt:3,jobs:[third]}];
   const before=JSON.stringify(attempts),origins=nativeJobOrigins(attempts);

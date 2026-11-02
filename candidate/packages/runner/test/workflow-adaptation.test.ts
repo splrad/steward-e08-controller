@@ -25,3 +25,16 @@ it('executes product commands from native YAML',async()=>{
   expect(step.run).toContain('pwsh -NoProfile -File ./tools/Publish-ReleaseAssets.ps1');
   expect(step.run).not.toMatch(/\$\{\{|SkipPluginBuild|release-pipeline build/);expect(step.env).toBeUndefined();
 });
+it('activates the trusted policy tool paths before validation outside its checkout',async()=>{
+  const d=YAML.parse(await readFile('.github/workflows/pr-validation-native.yml','utf8'));
+  for(const job of Object.values(d.jobs) as any[]){
+    const installed=job.steps.findIndex((s:any)=>s.uses?.startsWith('jdx/mise-action@'));
+    if(installed<0)continue;
+    const activated=job.steps.findIndex((s:any)=>s.run==='mise bin-paths >> "$GITHUB_PATH"');
+    expect(activated).toBeGreaterThan(installed);
+    expect(job.steps[activated]).toMatchObject({'working-directory':'policy',shell:'bash',env:{MISE_SAFE:'1',MISE_LOCKED:'1'}});
+    expect(job.steps[installed].with.env).toBe(false);
+    const execution=job.steps.findIndex((s:any)=>/^(?:npm|node)\b/m.test(s.run??''));
+    expect(activated).toBeLessThan(execution);
+  }
+});

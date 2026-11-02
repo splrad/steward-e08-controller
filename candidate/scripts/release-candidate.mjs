@@ -8,7 +8,7 @@ import { TagName } from 'release-please/build/src/util/tag-name.js';
 import { Version } from 'release-please/build/src/version.js';
 import { advanceReleaseCandidate, pushPreparedCandidate, collectContentInput, planContentBatches,
   resumeContentBatches, assembleUnitNotes, copilotReleaseClient, decodeCandidateDocument, splitContentText, releaseAffectedUnitIds, isolatedBuildEnvironment,
-  parseDeliveryConfig, mergedBuildCycle, assertRepositoryWrite } from '../packages/runner/dist/index.js';
+  parseDeliveryConfig, mergedBuildCycle, assertRepositoryWrite, completeMergedPull } from '../packages/runner/dist/index.js';
 import { readReleaseRecords, writeReleaseRecords, assertReleaseWriterProtection } from './release-record.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -36,7 +36,10 @@ export async function nativeReleaseCandidate(request, { token, readToken, copilo
     const bytes = Buffer.from(await response.arrayBuffer()); if (bytes.length > 16 * 1024 * 1024) fail('CANDIDATE_NATIVE_RESPONSE_LIMIT');
     return bytes.length ? JSON.parse(bytes.toString('utf8')) : null;
   };
-  const native = path => api('GET', `/repos/${request.repository}${path?'/'+path:''}`);
+  const native = async path => {
+    const value=await api('GET', `/repos/${request.repository}${path?'/'+path:''}`), pull=/^pulls\/([1-9][0-9]*)$/.exec(path);
+    return pull ? completeMergedPull(request.repository,Number(pull[1]),value,()=>pages(`issues/${pull[1]}/events`)) : value;
+  };
   const pages = async path => {
     const all = [], seen = new Set();
     for (let page = 1; page <= 10000; page++) {
@@ -85,7 +88,7 @@ export async function nativeReleaseCandidate(request, { token, readToken, copilo
         // Protection endpoints require the parent's administration-read credential.
         const response = await fetcher('https://api.github.com' + path, { method, headers: { authorization: 'Bearer ' + token, accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2026-03-10' } });
         return { status: response.status, bytes: new Uint8Array(await response.arrayBuffer()), headers: response.headers };
-      } });
+      } }, {token,fetcher});
       const result = await writeReleaseRecords({ directory: join(request.writeDirectory, `candidate-${++writes}`), remote: request.remote,
         repositoryId: request.repositoryId, defaultBranch: request.defaultBranch, targetRef: 'steward/release-state', writer: 'release', expectedHead,
         allowedPaths: changes.map(f => f.path), changes, identity: request.identity }, { token });

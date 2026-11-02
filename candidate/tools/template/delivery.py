@@ -308,7 +308,9 @@ def deliver(request, api, central_api, *, read_token=None, renderer=copier.rende
         parents = list(dict.fromkeys(([head] if head else []) + [base]))
         message = ('chore: update common repository template\n\n' + signoff + '\n'
                    + f"Steward-Sync-Run: {CENTRAL_ID}/{request['runId']}\n"
-                   + f"Steward-Sync-Source: {request['workflowSha']}\nSteward-Template: {template_sha}\n")
+                   # The native API removes trailing newlines. Send its canonical
+                   # representation so signature readback can still compare exactly.
+                   + f"Steward-Sync-Source: {request['workflowSha']}\nSteward-Template: {template_sha}")
         try: commit = api.request('POST', prefix + '/git/commits', {'message':message,'tree':tree,'parents':parents})
         except (NativeFailure, subprocess.TimeoutExpired): return {'status':'WAIT_COMMIT_RESPONSE'}
         commit_sha = commit.get('sha'); require(isinstance(commit_sha,str) and SHA.fullmatch(commit_sha), 'COMMIT_SHA')

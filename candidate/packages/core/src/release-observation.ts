@@ -1,4 +1,5 @@
 import { decodeSettingsReport } from './settings-report.js';
+import { withinNativeJobWindow } from './native-job-origins.js';
 import { decodeMaintenanceRecord } from './maintenance.js';
 import { decodePagesMaintenance } from './pages-maintenance.js';
 import { decodeCompletionArchive } from './release-history.js';
@@ -333,16 +334,15 @@ export async function deriveFailureBudget(nativeAttempts: NativeAttemptSet, arch
       const businessSteps = item.jobs.flatMap(job => job.steps.filter(step => step.name.startsWith('business-')).map(step => ({jobId:job.id,step})));
       if (!unique(item.invocations.map(record => record.evidence.invocationKey))) fail('duplicate invocation');
       for (const { jobId, step } of businessSteps) {
-        if (step.startedAt && !item.invocations.some(inv => inv.jobId === jobId && inv.stepNumber === step.number)) unknown.add(`${key}:step:${jobId}:${step.number}:missing-result`);
+        if (step.startedAt && step.conclusion !== 'skipped' && !item.invocations.some(inv => inv.jobId === jobId && inv.stepNumber === step.number)) unknown.add(`${key}:step:${jobId}:${step.number}:missing-result`);
       }
       for (const invocation of item.invocations) {
         const evidence = parseReleaseRecord('executionEvidence', invocation.evidence);
         const step = item.jobs.find(job => job.id === invocation.jobId)?.steps.find(step => step.number === invocation.stepNumber);
-        if (!step || !step.name.startsWith('business-') || evidence.jobId !== invocation.jobId && !(item.entry === 'publish' && evidence.jobId === null)
+        if (!step || step.conclusion === 'skipped' || !step.name.startsWith('business-') || evidence.jobId !== invocation.jobId && !(item.entry === 'publish' && evidence.jobId === null)
           || await nativeWaveKey(evidence) !== key || evidence.inputDigest !== item.inputDigest
           || time(evidence.observedAt) > time(item.observedAt)) { conflicts.add(`${key}:invocation-source`); continue; }
-        if (evidence.businessStartedProven && (!step.startedAt || time(evidence.startedAt) < time(step.startedAt)
-          || step.completedAt && time(evidence.startedAt) > time(step.completedAt))) { conflicts.add(`${key}:start-marker`); continue; }
+        if (evidence.businessStartedProven && (!step.startedAt || !withinNativeJobWindow(evidence.startedAt,step.startedAt,step.completedAt))) { conflicts.add(`${key}:start-marker`); continue; }
         const outcome = evidence.outcome;
         if (outcome === 'FACT_CONFLICT') { conflicts.add(`${key}:${evidence.invocationKey}:object-conflict`); continue; }
         if (outcome === null || outcome === 'UNKNOWN') { unknown.add(`${key}:${evidence.invocationKey}:outcome`); continue; }

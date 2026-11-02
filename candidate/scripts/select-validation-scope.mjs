@@ -7,7 +7,7 @@ export function selectValidationScope(input) {
   const reasons={source:[],dependency:[],docs:[],governance:[]};
   const add=(groups,path)=>{for(const group of groups)if(!reasons[group].includes(path))reasons[group].push(path);};
   for(const change of input.changes) {
-    if(!change||!(/^[AMDT]$/.test(change.status)||/^[RC]\d{1,3}$/.test(change.status))
+    if(!change||!(/^[AMDT]$/.test(change.status)||/^[RC](?:100|0?[0-9]{1,2})$/.test(change.status))
       ||!Array.isArray(change.paths)||change.paths.length!==(/^[RC]/.test(change.status)?2:1))fail();
     for(const path of change.paths) {
       if(typeof path!=='string'||!path||path.startsWith('/')||path.includes('\\')||path.split('/').some(p=>!p||p==='.'||p==='..')||/[\0-\x1f\x7f]/.test(path))fail();

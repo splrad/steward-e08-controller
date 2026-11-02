@@ -49,6 +49,13 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Activate trusted policy tool paths
+        working-directory: policy
+        shell: bash
+        env:
+          MISE_SAFE: '1'
+          MISE_LOCKED: '1'
+        run: mise bin-paths >> "$GITHUB_PATH"
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: policy
       - name: Record platform workflow provenance
@@ -100,6 +107,13 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Activate trusted policy tool paths
+        working-directory: policy
+        shell: bash
+        env:
+          MISE_SAFE: '1'
+          MISE_LOCKED: '1'
+        run: mise bin-paths >> "$GITHUB_PATH"
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: policy
       - name: Record platform workflow provenance
@@ -159,6 +173,13 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Activate trusted policy tool paths
+        working-directory: policy
+        shell: bash
+        env:
+          MISE_SAFE: '1'
+          MISE_LOCKED: '1'
+        run: mise bin-paths >> "$GITHUB_PATH"
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: policy
       - name: Record platform workflow provenance
@@ -235,6 +256,13 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Activate trusted policy tool paths
+        working-directory: policy
+        shell: bash
+        env:
+          MISE_SAFE: '1'
+          MISE_LOCKED: '1'
+        run: mise bin-paths >> "$GITHUB_PATH"
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: policy
       - name: Record platform workflow provenance
@@ -297,6 +325,13 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Activate trusted policy tool paths
+        working-directory: policy
+        shell: bash
+        env:
+          MISE_SAFE: '1'
+          MISE_LOCKED: '1'
+        run: mise bin-paths >> "$GITHUB_PATH"
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: policy
       - name: Record platform workflow provenance
@@ -343,6 +378,13 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Activate trusted policy tool paths
+        working-directory: policy
+        shell: bash
+        env:
+          MISE_SAFE: '1'
+          MISE_LOCKED: '1'
+        run: mise bin-paths >> "$GITHUB_PATH"
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: policy
       - name: Record platform workflow provenance

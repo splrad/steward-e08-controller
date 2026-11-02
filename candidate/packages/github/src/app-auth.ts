@@ -1,7 +1,7 @@
 import { createAppAuth } from '@octokit/auth-app';
 import { Octokit } from '@octokit/rest';
 import { GITHUB_API_VERSION } from './api-version.js';
-/** Central release discovery uses metadata only; each service call gets a fresh single-repository token. */
+/** Repository access is scoped per call. Organization administration remains organization-wide. */
 export async function nativeReleaseApp(privateKey: string, transport: typeof fetch = fetch) {
   const versionedFetch:typeof fetch=(url,init)=>{
     const headers=new Headers(init?.headers);headers.set('X-GitHub-Api-Version',GITHUB_API_VERSION);
@@ -17,14 +17,16 @@ export async function nativeReleaseApp(privateKey: string, transport: typeof fet
   const bot=(await new Octokit(options).request('GET /users/{username}',{username:`${appFact.slug}[bot]`})).data;
   if(bot.id!==301115370 || bot.type!=='Bot')throw new Error('RELEASE_APP_BOT_IDENTITY');
   const token=async(repositoryId?:number,kind:'release'|'candidate'|'candidate-read'|'quality'|'template'|'template-read'|'update-read'|'pages'='release')=>{
-    const permissions=kind==='pages'?{metadata:'read',contents:'write',actions:'write',administration:'read',actions_variables:'read',deployments:'read',attestations:'read'}
+    // GitHub exposes organization ruleset bypass actors only to organization rule managers.
+    // Trusted rule readers request that capability explicitly; discovery and generation do not.
+    const permissions=kind==='pages'?{metadata:'read',contents:'write',actions:'write',administration:'read',actions_variables:'read',deployments:'read',attestations:'read',organization_administration:'write'}
       :kind==='update-read'?{metadata:'read',contents:'read'}
-      :kind==='quality'?{metadata:'read',contents:'write',checks:'write',pull_requests:'read',actions:'read'}
+      :kind==='quality'?{metadata:'read',contents:'write',checks:'write',pull_requests:'read',actions:'read',organization_administration:'write'}
       :kind==='template'?{metadata:'read',contents:'write',pull_requests:'write',workflows:'write'}
-      :kind==='template-read'?{metadata:'read',contents:'read',pull_requests:'read',actions_variables:'read',actions:'read'}
+      :kind==='template-read'?{metadata:'read',contents:'read',pull_requests:'read',actions_variables:'read',actions:'read',organization_administration:'write'}
       :kind==='candidate-read'?{metadata:'read',contents:'read',pull_requests:'read',issues:'read'}
-      :kind==='candidate'?{metadata:'read',contents:'write',pull_requests:'write',issues:'write',administration:'read',actions:'read'}
-      :{metadata:'read',contents:'write',actions:'write',administration:'read'};
+      :kind==='candidate'?{metadata:'read',contents:'write',pull_requests:'write',issues:'write',administration:'read',actions:'read',organization_administration:'write'}
+      :{metadata:'read',contents:'write',actions:'write',checks:'read',administration:'read',organization_administration:'write'};
     const value=await app.auth({type:'installation',installationId:installation.id,refresh:true,
       ...(repositoryId===undefined?{permissions:{metadata:'read'}}:{repositoryIds:[repositoryId],permissions})}) as {token:string};
     if(!value.token)throw new Error('RELEASE_INSTALLATION_TOKEN');

@@ -1,4 +1,5 @@
 import {afterEach,expect,it,vi} from 'vitest';
+import {releaseProtectionFixture} from './fixtures/release-protection.js';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
@@ -40,8 +41,7 @@ async function fixture() {
     else if(p.endsWith('/git/ref/heads/steward/release-state')){const head=await stateHead();status=denied?403:head?200:404;value=head?{object:{sha:head}}:{};}
     else if(p.endsWith('/pulls'))value=closed;
     else if(p.endsWith('/releases')||p.endsWith('/tags'))value=[];
-    else if(p.includes('/rules/branches/'))value=['creation','update','deletion'].map(type=>({type,ruleset_id:5}));
-    else if(p.endsWith('/rulesets/5'))value={id:5,target:'branch',enforcement:'active',bypass_actors:[{actor_type:'Integration',actor_id:4243096,bypass_mode:'always'}]};
+    else if(releaseProtectionFixture(p))value=releaseProtectionFixture(p);
     else if(p.includes('/git/blobs/'))value={encoding:'base64',content:(await promisify(execFile)('git',['cat-file','blob',p.split('/').at(-1)!],{cwd:directory,env,encoding:'buffer',windowsHide:true})).stdout.toString('base64')};
     else throw Error('Unknown fixture endpoint '+path);
     return {status,bytes:new Uint8Array(Buffer.from(JSON.stringify(value))),headers:new Headers()};

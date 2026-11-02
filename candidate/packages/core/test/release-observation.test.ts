@@ -77,6 +77,14 @@ describe('closed factual schema 2',()=>{
   });
 });
 describe('failure budget from native attempts and evidence',()=>{
+  it('does not infer execution from timestamps on a skipped native step, and rejects conflicting receipts',async()=>{
+    const value=wave(),{native,context}=input([value]);value.jobs[0]!.steps[0]!.conclusion='skipped';
+    const receipt=value.invocations[0]!;value.invocations=[];
+    expect(await deriveFailureBudget(native,[],context)).toMatchObject({remaining:3,failedWaveKeys:[],unknownEvidence:[],conflictEvidence:[]});
+    value.invocations=[receipt];
+    const conflict=await deriveFailureBudget(native,[],context);expect(conflict.remaining).toBeNull();
+    expect(conflict.conflictEvidence.some(key=>key.endsWith(':invocation-source'))).toBe(true);
+  });
   it('keeps an unobserved current wave UNKNOWN instead of treating it as a trusted exclusion',async()=>{
     const {native,context}=input([wave()]);context.currentWave=wave(999);
     const result=await deriveFailureBudget(native,[],context);expect(result.remaining).toBeNull();expect(result.unknownEvidence).toContain('current-wave-not-observed');

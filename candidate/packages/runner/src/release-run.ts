@@ -7,7 +7,7 @@ import { isolatedBuildEnvironment } from './build-environment.js';
 import { parseDeliveryConfig } from '../../core/src/delivery-config.js';
 import { join } from 'node:path';
 import { downloadNativeArtifact } from './native-artifact-download.js';
-import { nativeJobOrigins } from '../../core/src/native-job-origins.js';
+import { nativeJobOrigins, withinNativeJobWindow } from '../../core/src/native-job-origins.js';
 import { parseDocument } from 'yaml';
 import { parseReleaseRecord, type CycleRecord } from '../../core/src/release-observation.js';
 import { decodeNativeDispatchObservation, decodeNativeSourceRejection, type NativeSourceRejection, type NativeDispatchObservation, type NativeRun } from '../../core/src/native-evidence.js';
@@ -323,7 +323,7 @@ export function verifyChannelProbe(context:EvidenceContext,targets:ChannelTarget
   for(const item of report.items) {
     const key=JSON.stringify([item.unitId,item.channelId]), target=targets.find(target=>target.unitId===item.unitId&&target.channelId===item.channelId),time=Date.parse(item.observedAt);
     if(!exact(item,['unitId','channelId','version','readStatus','exists','digest','accepted','indexed','observedAt','evidenceKind'])||!target||target.version!==item.version||seen.has(key)
-      ||!['OK','NOT_FOUND_CONFIRMED','PENDING','AUTH_UNKNOWN','TRANSIENT','CONFLICT'].includes(item.readStatus)||!Number.isFinite(time)||time<Date.parse(job.startedAt)||time>Date.parse(job.completedAt)
+      ||!['OK','NOT_FOUND_CONFIRMED','PENDING','AUTH_UNKNOWN','TRANSIENT','CONFLICT'].includes(item.readStatus)||!Number.isFinite(time)||!withinNativeJobWindow(item.observedAt,job.startedAt,job.completedAt)
       ||time>Date.parse(now)||typeof item.evidenceKind!=='string'||!item.evidenceKind||item.evidenceKind.length>200)fail('probe item');
     seen.add(key);oldest=Math.min(oldest,time);
     if(['AUTH_UNKNOWN','TRANSIENT','CONFLICT'].includes(item.readStatus)) {
@@ -460,14 +460,35 @@ async function searchDispatchRuns(context:EvidenceContext, request:Dispatch, io:
 }
 
 /** A moved ref is recoverable only after the complete native Run proves that no business step started. */
-export async function readChannelSourceRejections(context:EvidenceContext,history:SourceRejectionFile[],io:EvidenceTransport,observedAt:string) {
+export async function readChannelSourceRejections(context:EvidenceContext,history:SourceRejectionFile[],io:EvidenceTransport,observedAt:string,
+  responseHistory:{path:string;commit:string;value:NativeDispatchObservation}[]=[]) {
   const verified=new Set(history.filter(file=>file.value.cycleId===context.cycle.id).map(file=>verifyNativeSourceRejection(context,file).requestKey)),files:ArchiveFile[]=[];
   const reader=new NativeEvidenceReader(io,context.repository);
   for(const request of context.cycle.dispatches.filter(request=>request.purpose!=='build'&&request.canonicalRunId===null&&!verified.has(request.requestKey))) {
-    const search=await searchDispatchRuns(context,request,io,observedAt,true);
+    // The archived native 200 response identifies one exact Run even when the
+    // time-filtered inventory cannot expose it. Apply the same response identity
+    // checks as canonical binding; never substitute a caller-provided Run ID.
+    const returned=new Set<number>();
+    for(const file of responseHistory.filter(file=>file.value.requestKey===request.requestKey)) {
+      const value=decodeNativeDispatchObservation(Buffer.from(JSON.stringify(file.value)));
+      if(!/^[a-f0-9]{40}$/.test(file.commit)||dispatchObservationFile(value).path!==file.path
+        ||value.repositoryId!==context.repositoryId||value.cycleId!==context.cycle.id)fail('source response provenance');
+      if(value.kind!=='RESPONSE'||value.status!==200||value.response===null)continue;
+      const response=value.response;
+      if(response.run_url!==`https://api.github.com/repos/${context.repository}/actions/runs/${response.workflow_run_id}`
+        ||response.html_url!==`https://github.com/${context.repository}/actions/runs/${response.workflow_run_id}`)fail('source response identity');
+      returned.add(response.workflow_run_id);
+    }
+    if(returned.size>1)fail('ambiguous source response');
+    let matches:NativeRun[];
+    if(returned.size) {
+      const id=[...returned][0]!,run=nativeRunFact(await reader.json(`actions/runs/${id}`));
+      if(run.id!==id)fail('source response Run ID');
+      verifyExecutionSource(run,{...context,request:{...request,executionSha:run.headSha}});matches=[run];
+    } else matches=(await searchDispatchRuns(context,request,io,observedAt,true)).matches;
     // A matching original Run, an active duplicate, or ambiguous dispatch result must still be reconciled normally.
-    if(search.matches.length!==1)continue;
-    const run=search.matches[0]!;
+    if(matches.length!==1)continue;
+    const run=matches[0]!;
     if(run.headSha===request.executionSha||run.status!=='completed'||run.runAttempt!==1)continue;
     const jobs=(await reader.pages(`actions/runs/${run.id}/attempts/1/jobs`,'jobs')).map(jobFact);
     const source=jobs.find(job=>job.name==='source-check'&&job.conclusion==='failure');if(!source)continue;
@@ -615,7 +636,7 @@ export function verifyChannelResult(context:EvidenceContext,request:Dispatch,run
   if(!keys(item,['unitId','channelId','version','releaseId','manifestDigest','nativeObjectId','digest','accepted','indexed','consumed','observedAt'])||!target
     ||item.version!==target.version||item.releaseId!==target.releaseId||item.manifestDigest!==target.manifestDigest||item.digest!==target.manifestDigest
     ||typeof item.nativeObjectId!=='string'||!item.nativeObjectId||![item.accepted,item.indexed,item.consumed].every(value=>typeof value==='boolean')
-    ||!Number.isFinite(Date.parse(item.observedAt))||Date.parse(item.observedAt)<Date.parse(job.startedAt)||Date.parse(item.observedAt)>Date.parse(job.completedAt)
+    ||!Number.isFinite(Date.parse(item.observedAt))||!withinNativeJobWindow(item.observedAt,job.startedAt,job.completedAt)
     ||job.name!==`${request.inputs.mode}/${item.channelId}/${item.unitId}`||item.consumed&&request.purpose!=='channel-verify'
     ||request.purpose==='channel-verify'&&(!item.consumed||!item.accepted||!item.indexed))fail('channel result native fields');
   return structuredClone(item);

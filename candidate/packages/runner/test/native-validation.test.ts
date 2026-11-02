@@ -24,16 +24,29 @@ it('parses complete NUL-delimited Git renames with spaces and rejects truncation
   expect(parseNameStatus(Buffer.from('R100\0old name.md\0new name.md\0D\0deleted.png\0'))).toEqual([{status:'R100',paths:['old name.md','new name.md']},{status:'D',paths:['deleted.png']}]);
   for(const bytes of [Buffer.from('M\0file'),Buffer.from('R100\0old\0'),Buffer.from([255,0])])expect(()=>parseNameStatus(bytes)).toThrow();
 });
+it('accepts zero-padded Git similarity scores and rejects scores outside 0..100 at both input boundaries',async()=>{
+  const {parseNameStatus}=await script('validation-input'),{selectValidationScope}=await script('select-validation-scope');
+  for(const status of ['R000','R050','R099','C001','C100']){
+    const changes=parseNameStatus(Buffer.from(`${status}\0old/pyproject.toml\0new/pyproject.toml\0`));
+    expect(changes).toEqual([{status,paths:['old/pyproject.toml','new/pyproject.toml']}]);
+    expect(selectValidationScope(input(changes)).dependency.selected).toBe(true);
+  }
+  for(const status of ['R101','C999','R0100','R-01','R']){
+    expect(()=>parseNameStatus(Buffer.from(`${status}\0old\0new\0`))).toThrow('DIFF_STATUS');
+    expect(()=>selectValidationScope(input([{status,paths:['old','new']}]))).toThrow('INCOMPLETE');
+  }
+});
 it('reads real complete Git base/head and detects stale base, wrong checkout and missing source',async()=>{
   const {validationInput}=await script('validation-input'),root=await mkdtemp(join(tmpdir(),'validation-git-'));registerOfflineFixtureRoot(root);
   const git=(...args:string[])=>execFileSync('git',args,{cwd:root,encoding:'utf8'}).trim();
   try{
     git('init','--initial-branch=main');git('config','user.name','Fixture');git('config','user.email','fixture@example.invalid');
-    await writeFile(join(root,'old name.md'),'# title\n');git('add','.');git('commit','--signoff','--no-gpg-sign','-m','base');const base=git('rev-parse','HEAD');git('update-ref','refs/remotes/origin/main',base);
-    await rename(join(root,'old name.md'),join(root,'new name.md'));git('add','.');git('commit','--signoff','--no-gpg-sign','-m','rename');const head=git('rev-parse','HEAD');
+    const contents=Array.from({length:64},(_,i)=>`unique line ${i}\n`).join('');
+    await writeFile(join(root,'old name.md'),contents);git('add','.');git('commit','--signoff','--no-gpg-sign','-m','base');const base=git('rev-parse','HEAD');git('update-ref','refs/remotes/origin/main',base);
+    await rename(join(root,'old name.md'),join(root,'new name.md'));await writeFile(join(root,'new name.md'),contents.replace('unique line 63','edited last line'));git('add','.');git('commit','--signoff','--no-gpg-sign','-m','rename');const head=git('rev-parse','HEAD');
     const event=join(root,'event.json');await writeFile(event,JSON.stringify({repository:{id:1,full_name:'splrad/fixture'},pull_request:{base:{repo:{id:1},ref:'main',sha:base},head:{sha:head}}}));
     const env={GITHUB_EVENT_PATH:event,GITHUB_EVENT_NAME:'pull_request',GITHUB_REPOSITORY_ID:'1',GITHUB_REPOSITORY:'splrad/fixture',WORKFLOW_REPOSITORY:'splrad/steward',WORKFLOW_PATH:'.github/workflows/pr-validation-native.yml',WORKFLOW_SHA:S};
-    expect((await validationInput(root,env)).input.changes).toEqual([{status:'R100',paths:['old name.md','new name.md']}]);
+    expect((await validationInput(root,env)).input.changes).toEqual([{status:expect.stringMatching(/^R0[5-9][0-9]$/),paths:['old name.md','new name.md']}]);
     await expect(validationInput(root,{...env,WORKFLOW_REPOSITORY:'fork/steward'})).rejects.toThrow('TRUSTED_SOURCE');
     git('update-ref','refs/remotes/origin/main',head);await expect(validationInput(root,env)).rejects.toThrow('BASE_MOVED');
     git('update-ref','refs/remotes/origin/main',base);git('checkout',base);await expect(validationInput(root,env)).rejects.toThrow('CHECKOUT');

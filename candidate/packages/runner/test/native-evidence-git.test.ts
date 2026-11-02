@@ -11,6 +11,7 @@ import { isolatedBuildEnvironment } from '../src/build-environment.js';
 import { evidenceFixture, digest, NOW } from './native-evidence-fixture.js';
 import { archiveFile, inspectNativeCycle } from '../src/native-release-evidence.js';
 import { prepareChannelDispatch } from '../src/release-run.js';
+import { releaseProtectionFixture } from './fixtures/release-protection.js';
 
 vi.setConfig({testTimeout:30_000});
 const {writeReleaseRecords,readReleaseRecords,inspectReleaseEvidence,releaseCommand}=await import(pathToFileURL(resolve('scripts/release-record.mjs')).href);
@@ -55,8 +56,7 @@ it.each([false,true])('adopts zero-business source rejection before reselecting 
   const run={...f.native.runs.get(1),path:'.github/workflows/steward-release-channels.yml',head_sha:newR,head_branch:'main',display_title:request.requestKey,created_at:NOW,updated_at:later};
   const job={...f.native.jobs.get(1)![0],head_sha:newR,name:'source-check',started_at:NOW,completed_at:later,steps:[]};let sent:any=null;
   f.native.io.request=async(method,path,limit,body)=>{
-    if(path.includes('/rules/branches/'))return f.native.response(['creation','update','deletion'].map(type=>({type,ruleset_id:9})));
-    if(path.endsWith('/rulesets/9'))return f.native.response({id:9,enforcement:'active',target:'branch',bypass_actors:[{actor_type:'Integration',actor_id:4243096,bypass_mode:'always'}]});
+    if(releaseProtectionFixture(path))return f.native.response(releaseProtectionFixture(path));
     if(path.endsWith('/releases/20'))return f.native.response({id:20,tag_name:'v1.0.0',author:{id:42},body:'notes',draft:false,immutable:true});
     if(path.includes('/releases/20/assets?'))return f.native.response([{id:51,name:'app.zip',size:1}]);
     if(path.endsWith('/releases/assets/51'))return f.native.response('f');
@@ -104,8 +104,7 @@ it.each([false,true])('persists canonical dispatch through real fast-forward com
   const workflow='run-name: Build ${{ inputs.operation_key }}\non:\n  workflow_dispatch:\n    inputs:\n'+['cycle_id','operation_key','source_sha','controller_sha'].map(key=>`      ${key}: {type: string, required: true}\n`).join('');
   const bytes=Buffer.from(workflow),sha=createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
   f.native.io.request=async(method,path,limit,body)=>{
-    if(path.includes('/rules/branches/'))return f.native.response(['creation','update','deletion'].map(type=>({type,ruleset_id:9})));
-    if(path.endsWith('/rulesets/9'))return f.native.response({id:9,enforcement:'active',target:'branch',bypass_actors:[{actor_type:'Integration',actor_id:4243096,bypass_mode:'always'}]});
+    if(releaseProtectionFixture(path))return f.native.response(releaseProtectionFixture(path));
     if(path.includes('/contents/'))return f.native.response({type:'file',encoding:'base64',content:bytes.toString('base64'),size:bytes.length,sha});
     if(path.endsWith('/actions/workflows/10'))return f.native.response({id:10,path:'.github/workflows/steward-release-publish.yml',state:'active'});
     if(path.includes('/git/ref/heads/steward/build/'))return f.native.response({ref:`refs/heads/${f.native.request.ref}`,object:{type:'commit',sha:f.native.context.cycle.sourceSha}});
