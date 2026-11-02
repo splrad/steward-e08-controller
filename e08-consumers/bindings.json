@@ -34,9 +34,20 @@
           "SOURCE = 'https://github.com/splrad/steward-e08-controller.git'"
         ]
       ]
+    },
+    {
+      "path": "tools/template/test_delivery.py",
+      "sourceSha256": "cea14a647977da833b5f6416d20708de57df4cdaf44838a4c5e95036fcdb5f5f",
+      "boundSha256": "7e86c7a24dd37e642f838f5fac6f99c3cb276d35f41f19ffae8d670afecc7865",
+      "replacements": [
+        [
+          "actor_id':4243096",
+          "actor_id':5553347"
+        ]
+      ]
     }
   ],
   "priorMergedSha": "8fade180cff5587156809ff577739be8eae10d7e",
-  "runtimeSha256": "e4725229f9a5662f5a5c3e379e053b62f2ce85fc6cbfb5dbda8f5844de957e1b",
+  "runtimeSha256": "8ea0a8f10fa13dbc012b72461b7df55ce95138fd6592c2d95032145289c23a42",
   "sourceManifestSha256": "10922d0e1fd2703eefb5c70f0c43b9b22bfcaa38e86405a0b69d67dae18a1640"
 }

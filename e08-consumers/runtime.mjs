@@ -44,6 +44,7 @@ async function bind(path,replacements=[],typescript=false){
   evidence.bindings.push({source:path,sourceSha256:hash(original),boundSha256:hash(text),replacements});
   return pathToFileURL(target).href;
 }
+try{
 const runner=await import(fileUrl('packages/runner/dist/index.js'));
 const identities=[['4243096','5553347'],['301115370','350673636'],['splrad-steward[bot]','splrad-e08-release[bot]']];
 const record=await bind('scripts/release-record.mjs',[['actor_id!==4243096','actor_id!==5553347']]);
@@ -51,7 +52,6 @@ const quality=await bind('scripts/quality-language-summary.mjs',[...identities,[
 const auth=await bind('packages/github/src/app-auth.ts',[...identities.slice(0,2),['Iv23liuSr0qd4WLJdZhH','Iv23liu2OIRtzR11gmWk'],
   ["import { GITHUB_API_VERSION } from './api-version.js';","const GITHUB_API_VERSION='2026-03-10';"]],true);
 const repository={id:1440689606,full_name:'splrad/steward-e08-bootstrap',default_branch:'main'};
-try{
   if(mode==='bootstrap'){
     const bootstrap=await bind('scripts/repository-bootstrap.mjs',[
       ['splrad/steward','splrad/steward-e08-controller'],['1296724484','1440689456'],['4243096','5553347'],
@@ -80,9 +80,11 @@ try{
       const candidate=await bind('scripts/release-candidate.mjs',[["'./release-record.mjs'","'"+record+"'"]]);
       const directory=join(root,'target');await mkdir(directory);
       const clean=runner.isolatedBuildEnvironment(env,join(root,'candidate-profile'));
-      const git=async(...args)=>(await promisify(execFile)('git',['--no-replace-objects','-c','core.hooksPath=','-c','credential.helper=',...args],{cwd:directory,env:clean,timeout:90000})).stdout.trim();
+      let readCredential='';
+      const git=async(...args)=>(await promisify(execFile)('git',['--no-replace-objects','-c','core.hooksPath=','-c','credential.helper=',...args],{cwd:directory,
+        env:{...clean,...(readCredential?{GIT_CONFIG_COUNT:'1',GIT_CONFIG_KEY_0:'http.https://github.com/'+repository.full_name+'.git.extraheader',
+          GIT_CONFIG_VALUE_0:'AUTHORIZATION: basic '+Buffer.from('x-access-token:'+readCredential).toString('base64')}:{})},timeout:90000})).stdout.trim();
       await git('init','--initial-branch=main');await git('remote','add','origin','https://github.com/'+repository.full_name+'.git');
-      await git('fetch','--no-tags','origin','main');await git('checkout','--detach','FETCH_HEAD');
       const request={directory,writeDirectory:join(root,'candidate-writes'),remote:'https://github.com/'+repository.full_name+'.git',repository:repository.full_name,
         repositoryId:repository.id,defaultBranch:'main',appBotId:app.appBotId,identity:{name:app.appBotLogin,email:app.appBotId+'+'+app.appBotLogin+'@users.noreply.github.com'}};
       const stateSnapshot=async()=>{
@@ -94,13 +96,18 @@ try{
         return {head,cycleId:state.repository.activeCycleId,stateDigest:hash(await git('show',head+':state.json')),
           cycleDigest:hash(await git('show',head+':cycles/'+state.repository.activeCycleId+'.json'))};
       };
-      const before=await stateSnapshot();evidence.candidateBefore=before;
+      let before;
       const language={preflight:async()=>{throw Error('MODEL_PREFLIGHT_NOT_EXPECTED');},call:async()=>{evidence.modelCalls++;throw Error('MODEL_CALL_NOT_EXPECTED');}};
       for(let pass=1;pass<=2;pass++){
-        const result=await app.forCandidateRepository(repository.id,(token,readToken)=>(awaitCandidate(token,readToken)));
-        const after=await stateSnapshot();evidence.results.push({pass,...result,state:after});
-        check(result.status==='WAIT'&&result.reason==='ACTIVE_CYCLE','CANDIDATE_CONSUMER_RESULT');
-        check(JSON.stringify(after)===JSON.stringify(before),'CANDIDATE_CYCLE_CHANGED');
+        await app.forCandidateRepository(repository.id,async(token,readToken)=>{
+          readCredential=readToken;
+          try{
+            if(!before){before=await stateSnapshot();evidence.candidateBefore=before;}
+            const result=await awaitCandidate(token,readToken),after=await stateSnapshot();evidence.results.push({pass,...result,state:after});
+            check(result.status==='WAIT'&&result.reason==='ACTIVE_CYCLE','CANDIDATE_CONSUMER_RESULT');
+            check(JSON.stringify(after)===JSON.stringify(before),'CANDIDATE_CYCLE_CHANGED');
+          }finally{readCredential='';}
+        });
       }
       async function awaitCandidate(token,readToken){return (await import(candidate)).nativeReleaseCandidate(request,{token,readToken,
         controllerSha:env.GITHUB_SHA,controllerDirectory:tree,language,fetcher:transport,temporaryRoot:root});}
@@ -111,6 +118,9 @@ try{
         const io=qualityNativeIO(repository.full_name,token,transport),prs=await runner.qualityPages(io,`/repos/${repository.full_name}/pulls?state=open`);
         check(prs.length>0,'QUALITY_OPEN_PR_REQUIRED');
         const pr=prs.find(p=>p.head.ref==='steward/managed-sync')??prs[0];evidence.qualityPull={number:pr.number,head:pr.head.sha};
+        const ownChecks=await runner.qualityPages(io,`/repos/${repository.full_name}/commits/${pr.head.sha}/check-runs?filter=all`,'check_runs');
+        check(!ownChecks.some(c=>c.app?.id===5553347&&c.name==='SPLRAD Quality 中文说明'),'QUALITY_FRESH_HEAD_REQUIRED');
+        evidence.qualitySample='Fresh PR head for accepted Check-create response loss; second pass reuses persisted cache';
         // Synthetic input is created only in the authorized test repository. Native collection and output use production functions.
         const sourceName='E08 Quality Source Fixture',externalId='e08-quality-source:'+pr.number+':'+pr.head.sha;
         const lookup=async()=> (await runner.qualityPages(io,`/repos/${repository.full_name}/commits/${pr.head.sha}/check-runs?filter=all`,'check_runs'))
@@ -140,7 +150,7 @@ try{
             state.cache(pr.number),io,state.forPull(pr.number),language,{remaining:10,deadline:Date.now()+12*60000});
           evidence.results.push({pass,total:result.total,complete:result.complete,pending:result.pending,modelCalls:evidence.modelCalls});
           if(pass===1)firstPassCalls=evidence.modelCalls;
-          check(result.total===1&&result.complete===1&&result.pending===0&&evidence.modelCalls<=1&&evidence.modelCalls===firstPassCalls,'QUALITY_REPLAY');
+          check(result.total===1&&result.complete===1&&result.pending===0&&firstPassCalls===1&&evidence.modelCalls===firstPassCalls&&qualityResponseLost,'QUALITY_REPLAY');
         }
       });
     }
