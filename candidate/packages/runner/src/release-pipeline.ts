@@ -98,7 +98,7 @@ export async function readCycleDelivery(context:EvidenceContext,records:{path:st
       ||createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex')!==source.sha)fail('original delivery evidence required');
     return {delivery:parseDeliveryConfig(JSON.parse(bytes.toString('utf8'))),legacy:null};
   }catch(error) {
-    if(!(error instanceof EvidenceReadError&&error.status===404))throw error;
+    if (!((error instanceof EvidenceReadError) && error.status === 404)) throw error;
     const proofs=records.filter(r=>r.path.startsWith('evidence/normalized-delivery/')&&(r.value as {cycleId?:string})?.cycleId===context.cycle.id).map(r=>verifyNormalizedDelivery(context,r));
     if(!proofs.length)fail('NORMALIZED_DELIVERY_EVIDENCE_REQUIRED');
     if(proofs.some(proof=>JSON.stringify({...proof,observedAt:''})!==JSON.stringify({...proofs[0],observedAt:''})))fail('conflicting normalized delivery evidence');

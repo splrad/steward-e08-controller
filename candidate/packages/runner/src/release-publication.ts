@@ -96,8 +96,8 @@ export async function inspectPublications(context:EvidenceContext,history:Public
         check(same(latest,nativeRunFact(await reader.json(`actions/runs/${id}`))),'central Run changed');
       }catch(error) {
         const prior=records.filter(r=>r.value.centralRun.id===id&&r.value.attempts.length).sort((a,b)=>b.value.observedAt.localeCompare(a.value.observedAt))[0];
-        let expired=error instanceof EvidenceReadError&&error.status===410;
-        if(prior&&error instanceof EvidenceReadError&&error.status===404) {
+        let expired = (error instanceof EvidenceReadError) && error.status === 410;
+        if (prior && (error instanceof EvidenceReadError) && error.status === 404) {
           try{expired=!(await reader.pages(`actions/workflows/${prior.value.centralRun.workflowId}/runs`,'workflow_runs')).some(run=>run.id===id);}catch{/* Read denial is not expiry. */}
         }
         check(expired&&prior&&prior.value.attempts.every(a=>a.run.status==='completed'),'complete expired central history required');
