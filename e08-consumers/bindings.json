@@ -3,8 +3,8 @@
   "templateBindings": [
     {
       "path": "tools/template/delivery.py",
-      "sourceSha256": "cc494de54dea23eb1d0533fa815e9690b17e0a39f81a1fad6eded7fa985d57a5",
-      "boundSha256": "1df879e3747602e8bbac2e0d8eb01f45f2bfedce7bacd36dcc3406e97c1cc9e8",
+      "sourceSha256": "59b019b5e8bb532754377244372b1ac17648c9240ee67bbff8252d8d0d66af36",
+      "boundSha256": "d3e1b10baea72f0fd79e4486b02d509d3c2502a97d9809d798deff2f92005c3d",
       "replacements": [
         [
           "CENTRAL = 'splrad/steward'",
@@ -37,8 +37,8 @@
     },
     {
       "path": "tools/template/test_delivery.py",
-      "sourceSha256": "cea14a647977da833b5f6416d20708de57df4cdaf44838a4c5e95036fcdb5f5f",
-      "boundSha256": "7e86c7a24dd37e642f838f5fac6f99c3cb276d35f41f19ffae8d670afecc7865",
+      "sourceSha256": "4be1b36a93e5f2a1bf2515802c8138da39b83e9176f943bc81a66388a1badcd9",
+      "boundSha256": "99d53405413db707ac63c288bc27a70ac7b399e7ac47365c6ecc9347e74b2568",
       "replacements": [
         [
           "actor_id':4243096",
@@ -47,15 +47,17 @@
       ]
     }
   ],
-  "priorMergedSha": "8fade180cff5587156809ff577739be8eae10d7e",
+  "priorMergedSha": "1bdce31c0295c3a8e73a87f231d4077e02237759",
   "runtimeSha256": "9667a7f2e8ecfe42772e8cad260ce53b0ef4ace62ea028f752978b46ecb393b8",
-  "sourceManifestSha256": "844e06f24d404ac61b6c28e85f37212bf3f7d493762b99b724eeceef98698c74",
+  "sourceManifestSha256": "4bb2b5511481a4c80e8da212ca3576c763f01e2a83d725042770ca06405580b5",
   "sourceCorrections": {
     "scripts/repository-bootstrap.mjs": "26d397eb98ad5a310808c034c7d5244707e5323ce836fed9bcf45540bbd8ddc5",
     "scripts/settings-sync.mjs": "5eb5294520df770dfa1ee2f55372aa468514305128c10e021235c65b199e3906",
     "packages/runner/test/bootstrap-wiring.test.ts": "80a11fab0c43456b04ed65a2c12f8eb0fc742073d1f4531978931df406928c30",
     "tools/settings-sync/governance-identity.mjs": "a370760cb09e2aa3069c9c1838732effb330c0fc7cd14e8aa2e85b5b97d378f9",
-    "packages/runner/test/settings-sync.test.ts": "badb267a550d40e7402f58417142735293b50aa9df0be396b103b2ceb946fd76"
+    "packages/runner/test/settings-sync.test.ts": "badb267a550d40e7402f58417142735293b50aa9df0be396b103b2ceb946fd76",
+    "tools/template/delivery.py": "59b019b5e8bb532754377244372b1ac17648c9240ee67bbff8252d8d0d66af36",
+    "tools/template/test_delivery.py": "4be1b36a93e5f2a1bf2515802c8138da39b83e9176f943bc81a66388a1badcd9"
   },
   "revocationVerifierSha256": "06dc0cef6360f213f6182a8a4354e34779bbca6cb8db0e2c98c8a982badfb161"
 }
