@@ -57,7 +57,7 @@ const repository={id:1440689606,full_name:'splrad/steward-e08-bootstrap',default
     const bootstrap=await bind('scripts/repository-bootstrap.mjs',[
       ['splrad/steward','splrad/steward-e08-controller'],['1296724484','1440689456'],['4243096','5553347'],
       ["'./release-record.mjs'","'"+record+"'"],["'./quality-language-summary.mjs'","'"+quality+"'"],
-      ['return result;', 'return result.filter(r=>[1440689456,1440689534,1440689606].includes(r.id));']]);
+      ["'INSTALLATION_SCOPE');return result;}", "'INSTALLATION_SCOPE');return result.filter(r=>[1440689456,1440689534,1440689606].includes(r.id));}"]]);
     for(let pass=1;pass<=2;pass++){
       const counts=await (await import(bootstrap)).main(transport);
       evidence.results.push({pass,counts,sample:'Existing repository continuation; prior empty-repository windows retained'});
