@@ -14,6 +14,7 @@ from packaging.version import Version, InvalidVersion
 SOURCE = 'https://github.com/splrad/steward-e08-controller.git'
 INTERNAL = {'_min_copier_version', '_subdirectory', '_answers_file'}
 FORBIDDEN = {'VERSION', 'CHANGELOG.md', 'package.json', 'package-lock.json',
+             '.github/workflows/actions.lock',
              '.release-please-manifest.json', 'release-please-config.json',
              'mise.toml', 'mise.lock', '.github/delivery.json', '.github/steward-template-adoption.md'}
 ADOPTION_REPORT = '.github/steward-template-adoption.md'

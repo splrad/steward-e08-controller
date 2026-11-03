@@ -18,7 +18,8 @@ it('fixed delivery child receives scoped tokens, no App/Copilot secrets, no depe
           expect(options.env.STEWARD_TEMPLATE_TOKEN).toBe('write-fixture');expect(options.env.STEWARD_TEMPLATE_READ_TOKEN).toBe('read-fixture');
           expect(options.env.STEWARD_CENTRAL_READ_TOKEN).toBe('central-fixture');
           expect(Object.keys(options.env).filter(k=>/PRIVATE_KEY|COPILOT|NODE_OPTIONS|PYTHONPATH/.test(k))).toEqual([]);
-          const data=await readFile(args[args.indexOf('--request')+1]!,'utf8');expect(data).not.toMatch(/fixture|PRIVATE_KEY/);
+          const data=await readFile(args[args.indexOf('--request')+1]!,'utf8');expect(data).not.toContain('PRIVATE_KEY');
+          for(const token of ['write-fixture','read-fixture','central-fixture'])expect(data).not.toContain(token);
           await writeFile(args[args.indexOf('--output')+1]!,JSON.stringify({status:'DELIVERED',head:'a'.repeat(40),pullRequest:2}));
           child.emit('close',0);
         }catch(error){child.emit('error',error);}

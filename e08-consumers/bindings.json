@@ -3,8 +3,8 @@
   "templateBindings": [
     {
       "path": "tools/template/delivery.py",
-      "sourceSha256": "59b019b5e8bb532754377244372b1ac17648c9240ee67bbff8252d8d0d66af36",
-      "boundSha256": "d3e1b10baea72f0fd79e4486b02d509d3c2502a97d9809d798deff2f92005c3d",
+      "sourceSha256": "28b2b8848698fbecc325c172ff9a222d0ef2c7168008b8e8608a2cbd913706db",
+      "boundSha256": "e52eb2de91e2a2350c300f3cddb052b35e6c6593c018d8646aa10e78cc7052a5",
       "replacements": [
         [
           "CENTRAL = 'splrad/steward'",
@@ -26,8 +26,8 @@
     },
     {
       "path": "tools/template/copier_bridge.py",
-      "sourceSha256": "7fb76d3989e79365e7b36d5d5d9db72ea7f334d610090139ac72070779e47368",
-      "boundSha256": "df234bc088af815ea0ebaf0e244f8a0690c5c4cf0155e48ee8f23f90c031ffc8",
+      "sourceSha256": "54bb47cb6480fc7f0c47399175492927e79cfe1d912da41128bd08260983b23b",
+      "boundSha256": "b377775293b908c950ea7a3db35c0c2002511d193b6c406d2a616977f87dce0d",
       "replacements": [
         [
           "SOURCE = 'https://github.com/splrad/steward.git'",
@@ -37,8 +37,8 @@
     },
     {
       "path": "tools/template/test_delivery.py",
-      "sourceSha256": "4be1b36a93e5f2a1bf2515802c8138da39b83e9176f943bc81a66388a1badcd9",
-      "boundSha256": "99d53405413db707ac63c288bc27a70ac7b399e7ac47365c6ecc9347e74b2568",
+      "sourceSha256": "dc5491037178f64947b456f511098e92a5294cbe9005847471bec2dafc00bd9f",
+      "boundSha256": "a8bbce651469bde012a49531cbc4f57ed5507e24687e7e3b6434b5734993cb8f",
       "replacements": [
         [
           "actor_id':4243096",
@@ -47,7 +47,7 @@
       ]
     }
   ],
-  "priorMergedSha": "d82225d64e8035be2ebafe908c9133316c434f26",
+  "priorMergedSha": "6495bf94d0bf942cde275217b92f6a43290e1f7a",
   "runtimeSha256": "9667a7f2e8ecfe42772e8cad260ce53b0ef4ace62ea028f752978b46ecb393b8",
   "sourceManifestSha256": "ae2f3e783184a43b2aa4d71e4d7c95eb676f60f75113a346517da1ccbc23caa6",
   "sourceCorrections": {
@@ -56,12 +56,17 @@
     "packages/runner/test/bootstrap-wiring.test.ts": "80a11fab0c43456b04ed65a2c12f8eb0fc742073d1f4531978931df406928c30",
     "tools/settings-sync/governance-identity.mjs": "a370760cb09e2aa3069c9c1838732effb330c0fc7cd14e8aa2e85b5b97d378f9",
     "packages/runner/test/settings-sync.test.ts": "badb267a550d40e7402f58417142735293b50aa9df0be396b103b2ceb946fd76",
-    "tools/template/delivery.py": "59b019b5e8bb532754377244372b1ac17648c9240ee67bbff8252d8d0d66af36",
-    "tools/template/test_delivery.py": "4be1b36a93e5f2a1bf2515802c8138da39b83e9176f943bc81a66388a1badcd9",
+    "tools/template/delivery.py": "28b2b8848698fbecc325c172ff9a222d0ef2c7168008b8e8608a2cbd913706db",
+    "tools/template/test_delivery.py": "dc5491037178f64947b456f511098e92a5294cbe9005847471bec2dafc00bd9f",
     "packages/runner/dist/index.js": "56dac3fc5e71c0ec4d59015f2ac315851be1cd75195057371a36eef705068922",
     "packages/runner/test/quality-language-summary.test.ts": "c4ef76863ab8a502a119b6fb73c7485964fea7a80670cb830a4ebdc37a13911a",
     "packages/core/src/release-observation.ts": "4d7cb159922973b08b59171c8ad4bf15282f726235abcff92fbc200513a091d2",
-    "packages/core/test/quality-language-summary.test.ts": "f0c17e65739b42350377eb7bb028b02c066655e8a8efb6d3d2189fa7ed040871"
+    "packages/core/test/quality-language-summary.test.ts": "f0c17e65739b42350377eb7bb028b02c066655e8a8efb6d3d2189fa7ed040871",
+    "tools/template/actions_lock.py": "43291c2045d136cbd1114fb75919e5420f7baf59c87a30027e48e586c62137da",
+    "tools/template/test_actions_lock.py": "db84e4b7db53ea43cba394bb94dd6b31b564a2897f83c91d2f5a3a4adac26d7f",
+    "tools/template/copier_bridge.py": "54bb47cb6480fc7f0c47399175492927e79cfe1d912da41128bd08260983b23b",
+    "config/actions-lock-version.txt": "cc11b28a7a883e61ff0d2ea9d6c61e0efa0e1655fa6b9175e379445bec8c1c55",
+    "packages/runner/test/template-delivery.test.ts": "db18797c414b80ab9d86dfb7d788230f965de605d8f05da55bf59d1ca89d33f8"
   },
   "revocationVerifierSha256": "06dc0cef6360f213f6182a8a4354e34779bbca6cb8db0e2c98c8a982badfb161",
   "qualityTestBindings": [
@@ -77,5 +82,41 @@
       ],
       "reason": "Retain the existing isolated workflow credential-route expectation. GHU07 short-lived identity adoption is separately pending."
     }
-  ]
+  ],
+  "actionLockTransaction": {
+    "toolVersionSource": "config/actions-lock-version.txt",
+    "sourceFiles": {
+      "tools/template/actions_lock.py": {
+        "source": "43291c2045d136cbd1114fb75919e5420f7baf59c87a30027e48e586c62137da",
+        "candidate": "43291c2045d136cbd1114fb75919e5420f7baf59c87a30027e48e586c62137da",
+        "bound": "43291c2045d136cbd1114fb75919e5420f7baf59c87a30027e48e586c62137da"
+      },
+      "tools/template/test_actions_lock.py": {
+        "source": "db84e4b7db53ea43cba394bb94dd6b31b564a2897f83c91d2f5a3a4adac26d7f",
+        "candidate": "db84e4b7db53ea43cba394bb94dd6b31b564a2897f83c91d2f5a3a4adac26d7f",
+        "bound": "db84e4b7db53ea43cba394bb94dd6b31b564a2897f83c91d2f5a3a4adac26d7f"
+      },
+      "tools/template/delivery.py": {
+        "source": "28b2b8848698fbecc325c172ff9a222d0ef2c7168008b8e8608a2cbd913706db",
+        "candidate": "28b2b8848698fbecc325c172ff9a222d0ef2c7168008b8e8608a2cbd913706db",
+        "bound": "e52eb2de91e2a2350c300f3cddb052b35e6c6593c018d8646aa10e78cc7052a5"
+      },
+      "tools/template/copier_bridge.py": {
+        "source": "54bb47cb6480fc7f0c47399175492927e79cfe1d912da41128bd08260983b23b",
+        "candidate": "54bb47cb6480fc7f0c47399175492927e79cfe1d912da41128bd08260983b23b",
+        "bound": "b377775293b908c950ea7a3db35c0c2002511d193b6c406d2a616977f87dce0d"
+      },
+      "tools/template/test_delivery.py": {
+        "source": "dc5491037178f64947b456f511098e92a5294cbe9005847471bec2dafc00bd9f",
+        "candidate": "dc5491037178f64947b456f511098e92a5294cbe9005847471bec2dafc00bd9f",
+        "bound": "a8bbce651469bde012a49531cbc4f57ed5507e24687e7e3b6434b5734993cb8f"
+      },
+      "packages/runner/test/template-delivery.test.ts": {
+        "source": "db18797c414b80ab9d86dfb7d788230f965de605d8f05da55bf59d1ca89d33f8",
+        "candidate": "db18797c414b80ab9d86dfb7d788230f965de605d8f05da55bf59d1ca89d33f8",
+        "bound": "db18797c414b80ab9d86dfb7d788230f965de605d8f05da55bf59d1ca89d33f8"
+      }
+    },
+    "scope": "Complete target tree generation and verification before native delivery; source YAML bytes preserved."
+  }
 }

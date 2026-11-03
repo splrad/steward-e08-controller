@@ -12,6 +12,8 @@ from urllib.parse import unquote, urlparse, parse_qs
 
 import copier_bridge as bridge
 from delivery import deliver, NativeFailure, GitHubCLI, BRANCH, CENTRAL_ID
+from test_actions_lock import fixture_tool
+from actions_lock import LockFailure
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -60,7 +62,9 @@ class DeliveryTests(unittest.TestCase):
     def head(self):
         try:return self.git(self.remote,'rev-parse','--verify','refs/heads/'+BRANCH)
         except subprocess.CalledProcessError:return None
-    def run_delivery(self,**kwargs):return deliver(self.request,self.api,self.api,**kwargs)
+    def run_delivery(self,**kwargs):
+        kwargs.setdefault('lock_runner', fixture_tool)
+        return deliver(self.request,self.api,self.api,**kwargs)
     def edit(self,branch,path,content):
         with tempfile.TemporaryDirectory(prefix='edit-',dir=self.root) as temp:
             checkout=Path(temp)/'clone';self.git(self.root,'clone',str(self.remote),str(checkout));self.configure(checkout)
@@ -115,6 +119,21 @@ class DeliveryTests(unittest.TestCase):
         self.edit('develop',bridge.ADOPTION_REPORT,'Unresolved full report\n')
         with self.assertRaisesRegex(ValueError,'TEMPLATE_ADOPTION_INCOMPLETE'):self.run_delivery()
         self.assertFalse(self.api.mutations)
+
+    def test_lock_verification_failure_keeps_existing_branch_pr_and_lock(self):
+        first = self.run_delivery()
+        original = self.git(self.remote, 'show', first['head'] + ':.github/workflows/actions.lock')
+        metadata = copy.deepcopy(self.api.prs)
+        mutations = len(self.api.mutations)
+        def fail(mode, target):
+            fixture_tool(mode, target)
+            if mode == 'verify': raise LockFailure('TOOL_VERIFY_FAILED')
+        with self.assertRaisesRegex(LockFailure, 'TOOL_VERIFY_FAILED'):
+            self.run_delivery(lock_runner=fail)
+        self.assertEqual(self.head(), first['head'])
+        self.assertEqual(self.api.prs, metadata)
+        self.assertEqual(len(self.api.mutations), mutations)
+        self.assertEqual(self.git(self.remote, 'show', first['head'] + ':.github/workflows/actions.lock'), original)
 
     def test_real_template_rename_and_delete_reach_signed_tree_without_product_changes(self):
         self.git(self.central,'mv','templates/repository/.github/labeler.yml','templates/repository/.github/paths.yml')

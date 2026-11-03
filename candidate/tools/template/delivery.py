@@ -10,6 +10,7 @@ from urllib.parse import quote, urlencode
 
 import yaml
 import copier_bridge as copier
+import actions_lock
 
 BRANCH = 'steward/managed-sync'
 CENTRAL = 'splrad/steward'
@@ -76,7 +77,7 @@ class GitHubCLI:
                           '--title', 'chore: 更新公共仓库模板', '--body-file', str(path)])
 
 
-def deliver(request, api, central_api, *, read_token=None, renderer=copier.render):
+def deliver(request, api, central_api, *, read_token=None, renderer=copier.render, lock_runner=None):
     repository, repository_id = request['repository'], request['repositoryId']
     require(re.fullmatch(r'splrad/[A-Za-z0-9_.-]+', repository) and type(repository_id) is int and repository_id > 0, 'REPOSITORY')
     require(type(request['runId']) is int and request['runId'] > 0, 'RUN')
@@ -237,6 +238,7 @@ def deliver(request, api, central_api, *, read_token=None, renderer=copier.rende
             git('merge', '--no-ff', '--no-edit', '--signoff', base)
         require(not string('status', '--porcelain', '--untracked-files=all'), 'PREPARATION_DIRTY')
         template_sha = request['templateSha']
+        before_copier = copier.paths_in_tree(work)
         adopted = git('cat-file', '-e', base + ':.copier-answers.yml', allow_failure=True).returncode == 0
         if adopted:
             renderer(central, work, template_sha, 'update')
@@ -245,6 +247,8 @@ def deliver(request, api, central_api, *, read_token=None, renderer=copier.rende
             if (work / '.copier-answers.yml').exists():
                 _, template_sha, _ = copier.answers(central, work, env)
             copier.prepare_adoption(central, work, root/'seed', template_sha, expected_report=expected_report)
+        require(lock_runner is not None, 'ACTION_LOCK_RUNNER_REQUIRED')
+        actions_lock.prepare(work, before_copier, lock_runner)
         if string('status', '--porcelain', '--untracked-files=all'):
             git('add', '--all'); git('commit', '--signoff', '--no-gpg-sign', '-m', 'chore: update common repository template')
             require(string('show','-s','--format=%B').splitlines().count(signoff) == 1, 'LOCAL_SIGNOFF')
@@ -348,13 +352,18 @@ def main():
         require(os.environ.get('STEWARD_TEMPLATE_READ_TOKEN'), 'READ_TOKEN_REQUIRED')
         target = GitHubCLI(args.gh, os.environ.get('STEWARD_TEMPLATE_TOKEN'), root/'target', os.environ['STEWARD_TEMPLATE_READ_TOKEN'])
         central = GitHubCLI(args.gh, os.environ.get('STEWARD_CENTRAL_READ_TOKEN'), root/'central')
-        result = deliver(request, target, central, read_token=os.environ.get('STEWARD_TEMPLATE_READ_TOKEN'))
+        locker = actions_lock.OfficialTool(args.gh, request['central'], request['workflowSha'], request['repository'],
+                                          os.environ.get('STEWARD_CENTRAL_READ_TOKEN'), root/'actions-lock')
+        result = deliver(request, target, central, read_token=os.environ.get('STEWARD_TEMPLATE_READ_TOKEN'), lock_runner=locker)
         with open(args.output, 'x', encoding='utf-8') as stream: json.dump(result, stream)
         if result['status'] not in ['DELIVERED','UNCHANGED','NO_DIFF','CLOSED']: raise NativeFailure('SYNC_INCOMPLETE')
 
 
 if __name__ == '__main__':
     try: main()
+    except actions_lock.LockFailure as error:
+        import sys
+        print(error.code, file=sys.stderr); sys.exit(1)
     except Exception:
         import sys
         print('TEMPLATE_DELIVERY_FAILED', file=sys.stderr); sys.exit(1)
