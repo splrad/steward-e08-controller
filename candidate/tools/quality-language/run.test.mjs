@@ -4,17 +4,17 @@ import { access } from 'node:fs/promises';
 import { qualityLanguage } from './run.mjs';
 const item={sourceCommentId:'review:1',sourceCommit:'a'.repeat(40),sourceUrl:'https://github.com/a/b/pull/1',severity:'P1',originalIdentifiers:['API'],segmentIndex:0,
   problemZh:'存在问题。',impactZh:'调用失败。',suggestionZh:'验证输入。'};
-function fixture({auth=true,remaining=80,overage=false,reply={items:[item]},failure=null,metricsFailure=false}={}) {
+function fixture({auth=true,models=[{id:'native-default'}],reply={items:[item]},failure=null,metricsFailure=false}={}) {
   const events=[],handlers=new Map();let clientOptions,sessionOptions,sendArgs;
   const client={start:async()=>events.push('start'),stop:async()=>events.push('stop'),getAuthStatus:async()=>({isAuthenticated:auth}),
-    rpc:{account:{getQuota:async()=>({quotaSnapshots:{chat:{isUnlimitedEntitlement:false,remainingPercentage:remaining,overageAllowedWithExhaustedQuota:overage}}})},models:{list:async()=>({models:[{id:'native-default'}]})}},
+    rpc:{account:{getQuota:async()=>{throw Error('PERSONAL_QUOTA_NOT_APPLICABLE');}},models:{list:async()=>({models})}},
     createSession:async options=>{sessionOptions=options;events.push('session');return {on:(key,fn)=>handlers.set(key,fn),abort:async()=>events.push('abort'),disconnect:async()=>events.push('disconnect'),
       sendAndWait:async(...args)=>{sendArgs=args;events.push('send');if(failure)throw failure;handlers.get('assistant.usage')({data:{model:'actual-model',inputTokens:11,outputTokens:7}});return {data:{content:JSON.stringify(reply)}};},
       rpc:{usage:{getMetrics:async()=>{if(metricsFailure)throw Error('raw session secret');return {currentModel:'actual-model',totalNanoAiu:1500000000,totalPremiumRequestCost:2,totalUserRequests:1};}}}};}};
   return {create:options=>{clientOptions=options;return client;},events,options:()=>({clientOptions,sessionOptions,sendArgs})};
 }
-test('auth/quota preflight is read-only and requires a native no-overage fact',async()=>{
-  for(const [options,status] of [[{},'READY'],[{auth:false},'WAIT_AUTH'],[{remaining:0},'WAIT_QUOTA'],[{overage:true},'WAIT_QUOTA'],[{overage:null},'WAIT_QUOTA']]) {
+test('organization-token preflight checks auth and available models without consulting personal quotas',async()=>{
+  for(const [options,status] of [[{},'READY'],[{auth:false},'WAIT_AUTH'],[{models:[]},'WAIT_QUOTA']]) {
     const f=fixture(options),result=await qualityLanguage('preflight','','fixture',f.create);assert.equal(result.status,status);assert.deepEqual(f.events,['start','stop']);
     await assert.rejects(access(f.options().clientOptions.baseDirectory));
   }
@@ -37,9 +37,13 @@ test('malformed/model-injected output, timeout and metrics failure abort and san
   }
 });
 test('runtime auth/quota errors preserve Retry-After and close resources',async()=>{
-  const f=fixture({failure:{status:429,response:{headers:new Headers({'retry-after':'600'})}}});
-  const result=await qualityLanguage('translate','{"items":[{}]}','fixture',f.create);assert.deepEqual(result,{status:'WAIT_QUOTA',retryAfterMs:600000});
-  assert.deepEqual(f.events.slice(-3),['abort','disconnect','stop']);
+  for (const status of [401,403,429]) {
+    const f=fixture({failure:{status,response:{headers:new Headers({'retry-after':'600'})}}});
+    const result=await qualityLanguage('translate','{"items":[{}]}','fixture',f.create);
+    assert.deepEqual(result,{status:status===429?'WAIT_QUOTA':'WAIT_AUTH',retryAfterMs:600000});
+    assert.equal(f.events.filter(event=>event==='send').length,1);
+    assert.deepEqual(f.events.slice(-3),['abort','disconnect','stop']);
+  }
 });
 test('oversized input or unknown mode never constructs a client',async()=>{
   const f=fixture();await assert.rejects(qualityLanguage('translate','x'.repeat(24577),'fixture',f.create),/INPUT_LIMIT/);

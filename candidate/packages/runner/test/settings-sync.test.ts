@@ -51,6 +51,9 @@ it('settings workflow isolates installation, main-only credentials, NOP default 
   expect(job.steps[4].env.PRIVATE_KEY).toBe('${{ secrets.GOVERNANCE_APP_PRIVATE_KEY }}');
   expect(job.steps[4].env.FULL_SYNC_NOP).toBe("${{ vars.STEWARD_SETTINGS_APPLY == 'true' && 'false' || 'true' }}");
   expect(raw).not.toMatch(/upload-artifact|matrix:|GITHUB_OUTPUT/);
+  expect(workflow.on.push.paths).not.toContain('config/governance/actions-policies.json');
+  const runner=await readFile('scripts/settings-sync.mjs','utf8');
+  expect(runner).not.toMatch(/actions-policies|reconcileActionsPolicies|actionsPolicyObservations|policyFailure/);
   const {settingsEnvironment}=await import(pathToFileURL(resolve('scripts/settings-sync.mjs')).href);
   const source={...process.env,APP_ID:'123',PRIVATE_KEY:'fixture-key',GH_TOKEN:'private-canary',COPILOT_GITHUB_TOKEN:'private-canary',NODE_OPTIONS:'private-canary',
     GITHUB_REPOSITORY:'splrad/steward',GITHUB_REPOSITORY_ID:'1296724484',GITHUB_REF:'refs/heads/main',GITHUB_RUN_ID:'21',STEWARD_DEFAULT_BRANCH:'main',

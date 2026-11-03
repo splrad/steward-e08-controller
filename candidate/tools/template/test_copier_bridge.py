@@ -135,6 +135,27 @@ class CopierTests(unittest.TestCase):
         self.assertIn('.copier-answers.yml', difference['new'])
         self.assertEqual(bridge.paths_in_tree(self.product), before)
 
+    def test_review_recovery_uses_a_new_template_version_and_keeps_product_changes(self):
+        self.copy_adopt()
+        original = (self.product / 'AGENTS.md').read_bytes()
+        contribution = self.product / 'CONTRIBUTING.md'
+        contribution.write_text(contribution.read_text(encoding='utf-8') + '\n## Product notes\nKeep this recovery evidence.\n', encoding='utf-8')
+        self.commit(self.product, 'Keep product contribution text')
+        changed = self.next_version(lambda template: (template / 'AGENTS.md').write_bytes(original + b'\nReviewed second version.\n'))
+        bridge.render(self.central, self.product, changed, 'update')
+        self.commit(self.product, 'Adopt second template')
+        (self.central / 'templates/repository/AGENTS.md').write_bytes(original)
+        recovery = self.commit(self.central, 'Restore reviewed text in a new version')
+        self.git(self.central, 'tag', 'v3.0.0')
+        result = bridge.render(self.central, self.product, recovery, 'update')
+        self.assertEqual((self.product / 'AGENTS.md').read_bytes(), original)
+        self.assertIn('Keep this recovery evidence.', contribution.read_text(encoding='utf-8'))
+        self.assertEqual(result['answers']['_src_path'], bridge.SOURCE)
+        self.assertEqual(result['answers']['_commit'], 'v3.0.0')
+        self.assertEqual(self.git(self.central, 'rev-parse', result['answers']['_commit'] + '^{commit}'), recovery)
+        self.commit(self.product, 'Adopt recovery template')
+        self.assertEqual(bridge.render(self.central, self.product, recovery, 'update')['paths'], [])
+
     def test_conflict_and_dirty_tree_are_not_delivery_ready(self):
         self.copy_adopt()
         path = self.product / 'AGENTS.md'

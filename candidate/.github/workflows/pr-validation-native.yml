@@ -20,9 +20,9 @@ jobs:
       dependency: ${{ steps.scope.outputs.dependency }}
       docs: ${{ steps.scope.outputs.docs }}
       governance: ${{ steps.scope.outputs.governance }}
-      mode: ${{ steps.scope.outputs.mode }}
-      base: ${{ steps.scope.outputs.base }}
-      head: ${{ steps.scope.outputs.head }}
+      mode: ${{ steps.identity.outputs.mode }}
+      base: ${{ steps.identity.outputs.base }}
+      head: ${{ steps.identity.outputs.head }}
     env:
       VALIDATION_WORKSPACE: ${{ github.workspace }}/target
     steps:
@@ -66,19 +66,46 @@ jobs:
           WORKFLOW_PATH: ${{ job.workflow_file_path }}
         run: |
           printf 'WORKFLOW_REPOSITORY=%s\nWORKFLOW_SHA=%s\nWORKFLOW_PATH=%s\n' "$WORKFLOW_REPOSITORY" "$WORKFLOW_SHA" "$WORKFLOW_PATH" >> "$GITHUB_ENV"
-      - id: scope
+      - id: identity
         run: node policy/scripts/validation-input.mjs
         env:
           VALIDATION_EVIDENCE: validation-scope.json
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: scope
+        with:
+          token: ''
+          working-directory: target
+          base: ${{ steps.identity.outputs.base }}
+          ref: ${{ steps.identity.outputs.head }}
+          list-files: json
+          filters: |
+            source: &source
+              - '!**/*.{md,mdx,html,htm,png,jpg,jpeg,gif,svg,webp,ico}'
+              - '{.github,templates,schema,config,scripts,tools}/**'
+              - '**/{AGENTS.md,AGENTS.override.md,CONTRIBUTING.md,copilot-instructions.md,*.instructions.md}'
+            governance: *source
+            dependency:
+              - '**/{package.json,package-lock.json,npm-shrinkwrap.json,mise.toml,mise.lock,pyproject.toml,requirements*.txt,*.lock,*.lock.json,global.json,Directory.Build.props,Directory.Packages.props,*.csproj,*.sln,*.slnx,go.mod,go.sum,Cargo.toml,pom.xml,CMakeLists.txt}'
+              - '{.github/workflows,templates,schema,config,tools}/**'
+              - '**/{AGENTS.md,AGENTS.override.md,CONTRIBUTING.md,copilot-instructions.md,*.instructions.md}'
+            docs:
+              - '**'
+      - name: Save native filter outputs
+        env:
+          FILTER_OUTPUTS: ${{ toJSON(steps.scope.outputs) }}
+        run: node --input-type=module -e 'import {writeFileSync} from "node:fs"; writeFileSync("validation-filter.json", process.env.FILTER_OUTPUTS + "\n");'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: ${{ always() }}
         with:
           name: validation-scope-${{ github.run_id }}-${{ github.run_attempt }}
-          path: validation-scope.json
+          path: |
+            validation-scope.json
+            validation-filter.json
           if-no-files-found: error
   source-linux:
     name: Source linux
     needs: scope
+    if: needs.scope.outputs.source == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -145,6 +172,7 @@ jobs:
   source-windows:
     name: Source windows
     needs: scope
+    if: needs.scope.outputs.source == 'true'
     runs-on: windows-2025
     timeout-minutes: 45
     env:
@@ -228,6 +256,7 @@ jobs:
   governance:
     name: Governance scans
     needs: scope
+    if: needs.scope.outputs.governance == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -274,9 +303,25 @@ jobs:
         run: |
           printf 'WORKFLOW_REPOSITORY=%s\nWORKFLOW_SHA=%s\nWORKFLOW_PATH=%s\n' "$WORKFLOW_REPOSITORY" "$WORKFLOW_SHA" "$WORKFLOW_PATH" >> "$GITHUB_ENV"
       - run: node policy/scripts/validation-governance.mjs
+      - name: Verify action dependency lock with the trusted tool version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_HOST: github.com
+          GH_REPO: ${{ github.repository }}
+          GH_CONFIG_DIR: ${{ runner.temp }}/actions-lock-config
+          GH_ACTIONS_LOCK_REPO_ROOT: ${{ github.workspace }}/target
+        run: |
+          set -euo pipefail
+          ACTIONS_LOCK_VERSION="$(cat policy/config/actions-lock-version.txt)"
+          [[ "$ACTIONS_LOCK_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh extension install github/gh-actions-lock --pin "$ACTIONS_LOCK_VERSION"
+          cd target
+          gh actions-lock --verify --no-interactive
   dependency:
     name: Dependency review
     needs: scope
+    if: needs.scope.outputs.dependency == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -297,6 +342,7 @@ jobs:
   docs:
     name: Documentation links
     needs: scope
+    if: needs.scope.outputs.docs == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:

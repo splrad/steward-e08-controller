@@ -16,6 +16,10 @@ concurrency:
   queue: max
 jobs:
   bootstrap:
+    concurrency:
+      group: steward-governance-mutation
+      cancel-in-progress: false
+      queue: max
     if: github.repository == 'splrad/steward-e08-controller' && github.repository_id == '1440689456' && github.ref == 'refs/heads/e08-channel-trunk'
     runs-on: ubuntu-24.04
     timeout-minutes: 20

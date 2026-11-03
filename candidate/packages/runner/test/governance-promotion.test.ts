@@ -23,6 +23,16 @@ function source(){
   }};return fixture;
 }
 const input={workflowId:5,event:'workflow_run',sourceRunId:12,controllerSha:M,requiredJobs:['Scope','SPLRAD Validation']};
+it('accepts a scope-skipped job only with the trusted aggregate successful and keeps failures blocked',async()=>{
+  const {selectPromotion}=await module(),f=source();
+  f.jobs.push({...f.jobs[1]!,id:10,name:'Source linux',conclusion:'skipped'});
+  const policy={...input,requiredJobs:[...input.requiredJobs,'Source linux'],skippableJobs:['Source linux']};
+  expect(await selectPromotion(f,policy)).toMatchObject({status:'ELIGIBLE',jobIds:[8,9,10]});
+  await expect(selectPromotion(f,{...policy,skippableJobs:[]})).rejects.toThrow('JOBS_INCOMPLETE');
+  f.jobs[2]!.conclusion='failure';await expect(selectPromotion(f,policy)).rejects.toThrow('JOBS_INCOMPLETE');
+  f.jobs[2]!.conclusion='skipped';f.jobs[1]!.conclusion='skipped';await expect(selectPromotion(f,policy)).rejects.toThrow('JOBS_INCOMPLETE');
+  await expect(selectPromotion(f,{...policy,skippableJobs:['SPLRAD Validation']})).rejects.toThrow('SKIP_POLICY');
+});
 it.each(['workflow_run','schedule','workflow_dispatch'])('binds exact central native validation source and all required jobs: %s',async event=>{
   const f=source();expect(await (await module()).selectPromotion(f,{...input,event})).toMatchObject({status:'ELIGIBLE',sha:M,runId:12,runAttempt:2,jobIds:[8,9]});
 });

@@ -1,10 +1,10 @@
 # 治理版本提升
 
-[Governance Promotion](../.github/workflows/governance-promotion.yml) 核验中央 Native Validation 的真实 workflow ID、路径、仓库 ID、main push、当前提交和全部成功 jobs。它从默认分支受审源码执行，并在获取治理 App 安装令牌前再次核对 main。
+[Governance Promotion](../.github/workflows/governance-promotion.yml) 核验中央 Native Validation 的真实 workflow ID、路径、仓库 ID、main push、当前提交和完整 jobs。范围与汇总 job 必须成功；可信工作流中按范围选择的 job 可为 skipped，其适用性由成功的汇总核验。其他失败、取消或缺失结果都会阻断采用。它从默认分支受审源码执行，并在获取治理 App 安装令牌前再次核对 main。
 
 workflow_run 只接收 main 分支事件，job 先筛选中央仓库的成功 main push。独立预检步骤使用只读 token，未注入治理私钥；其结果只决定是否进入后续步骤。获取治理凭据的步骤重新读取原生来源和当前 main，预检文件不能充当写授权。
 
-扫描采用独立决策 `E07-PROMOTION-WORKFLOW-RUN-20261031`：只接受上述工作流准确 `on.workflow_run` 的原生 dangerous-triggers 诊断，要求候选与可信 P 的工作流语义相同。同项目完整 Action SHA 和既有 mise 正式版本可沿原生更新变化；权限、来源、执行、缓存/产物及其他语义变化仍须重新审查。原始扫描结果和非零退出码保留；其他发现继续失败。
+扫描采用独立决策 `E07-PROMOTION-WORKFLOW-RUN-20261031`：只接受 `.github/workflows/governance-promotion.yml` 的准确 `on.workflow_run` 原生 dangerous-triggers 诊断。原始扫描结果和非零退出码保留；其他发现继续失败。此诊断例外不替代事件来源、ref、job 权限、environment 和写入前复核，也不改变工作流修改的常规审查要求。
 
 采用前设置真实 `NATIVE_VALIDATION_WORKFLOW_ID`、`GOVERNANCE_APP_ID` 和 `steward-automation/GOVERNANCE_APP_PRIVATE_KEY`，完成首次模板标签与组织规则交接，再启用 `STEWARD_GOVERNANCE_PROMOTION`。这些原生登记和部署状态需要分别回读；本地实现不等于线上启用。
 

@@ -125,7 +125,7 @@ it('workflow uses one Environment, reviewed SHA, scheduled observer and credenti
   expect(workflow.on.schedule[0].cron).toBe('8-58/10 * * * *');expect(workflow.concurrency).toEqual({group:'steward-quality-language','cancel-in-progress':false});
   const job=workflow.jobs['quality-summary'];expect(job['timeout-minutes']).toBe(20);expect(job.environment.name).toBe('steward-release-notes');
   expect(job.steps[0].with.ref).toBe('${{ github.workflow_sha }}');expect(job.steps[2].env).toBeUndefined();
-  expect(job.steps[3].env.STEWARD_COPILOT_TOKEN).toBe('${{ secrets.COPILOT_GITHUB_TOKEN }}');
+  expect(job.steps[3].env.STEWARD_COPILOT_TOKEN).toBe('${{ github.token }}');
 });
 it('wake sorts by durable observation, shares the ten batch limit, and emits no repository identifiers',async()=>{
   const {qualityWake}=await import(pathToFileURL(resolve('scripts/quality-language-summary.mjs')).href);

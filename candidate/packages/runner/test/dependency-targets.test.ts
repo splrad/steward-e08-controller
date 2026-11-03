@@ -85,7 +85,7 @@ it('rechecks the write token repository ID after name selection and handles 404 
     configStatus=404;await main(env,transport,factory);expect(await readFile(env.GITHUB_OUTPUT,'utf8')).toContain('enabled=false');
   }finally{output.mockRestore();await rm(root,{recursive:true,force:true});}
 });
-it('workflow keeps independent health, isolated failure, bounded jobs and minimal scoped write credentials',async()=>{
+it('workflow keeps isolated failure, bounded jobs and minimal scoped write credentials',async()=>{
   const raw=await readFile('.github/workflows/update-dependencies.yml','utf8'),w=YAML.parse(raw),{targets,update}=w.jobs;
   expect(w.on.workflow_dispatch?.inputs).toBeUndefined();expect(w.on.schedule).toEqual([{cron:'11 1 * * *'}]);
   expect(targets.if).toContain("vars.STEWARD_UPDATES_APPLY == 'true'");expect(update.if).toContain('!cancelled()');
@@ -94,5 +94,5 @@ it('workflow keeps independent health, isolated failure, bounded jobs and minima
   expect(token.with.repositories).toBe('${{ steps.before.outputs.repository }}');expect(token.with['permission-administration']).toBeUndefined();
   expect(check.env.UPDATE_WRITE_TOKEN).toBe('${{ steps.target-token.outputs.token }}');expect(run.if).toContain('steps.write-check.outputs.enabled');
   expect(run.env.RENOVATE_REPOSITORIES).toContain('steps.write-check.outputs.full_name');
-  expect(w.jobs['automation-health'].needs).toBeUndefined();expect(raw).not.toMatch(/dependency-updates (targets|preflight)|docker\.sock|policySha/);
+  expect(w.jobs['automation-health']).toBeUndefined();expect(raw).not.toMatch(/dependency-updates (targets|preflight)|docker\.sock|policySha/);
 });

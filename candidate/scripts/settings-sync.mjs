@@ -5,12 +5,12 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-import { settingsGovernanceIdentity } from '../tools/settings-sync/governance-identity.mjs';
 import { Octokit } from '@octokit/rest';
 import { parse } from 'yaml';
 import { isolatedBuildEnvironment } from '../packages/runner/dist/index.js';
 import { readReleaseRecords, writeReleaseRecords } from './release-record.mjs';
 import { assertQualityProtection, qualityNativeIO } from './quality-language-summary.mjs';
+import { settingsGovernanceIdentity } from '../tools/settings-sync/governance-identity.mjs';
 
 const branch = 'steward/governance-state';
 const check = (value, code) => { if (!value) throw new Error(code); };

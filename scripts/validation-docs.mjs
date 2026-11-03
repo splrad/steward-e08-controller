@@ -5,9 +5,8 @@ import {pathToFileURL,fileURLToPath} from 'node:url';
 import {validationInput,regular} from './validation-input.mjs';
 import {resolvePolicyTool,renderLinkcheckFirewall,linkcheckEnvironment} from '../packages/runner/dist/index.js';
 const check=(ok,reason)=>{if(!ok)throw Error('DOC_LINK_'+reason);};
-export async function documentInputs(workspace,files,changes){
+export async function documentInputs(workspace,files,affected){
   const docs=files.filter(p=>/\.(?:md|mdx|html?)$/.test(p)),selected=new Set();
-  const affected=changes.flatMap(c=>c.paths);
   const targets=[...new Set(affected.map(path=>basename(path)))];
   for(const path of docs){
     const file=await regular(workspace,path);
@@ -43,9 +42,8 @@ export function externalResults(report){
   return results;
 }
 export async function main(env=process.env){
-  const workspace=resolve(env.VALIDATION_WORKSPACE??'target'),{scope,files,input}=await validationInput(workspace,env);
-  if(!scope.docs.selected){console.log('docs: not-applicable (complete trusted diff)');return;}
-  const documents=await documentInputs(workspace,files,input.changes);
+  const workspace=resolve(env.VALIDATION_WORKSPACE??'target'),{files,input}=await validationInput(workspace,env);
+  const documents=await documentInputs(workspace,files,input.changedPaths);
   if(!documents.length){console.log('docs: no affected current document references');return;}
   const output=resolve(env.DOC_LINK_EVIDENCE??'doc-link-evidence');await mkdir(output,{recursive:true});
   await writeFile(join(output,'inputs.json'),JSON.stringify({input,documents},null,2)+'\n');

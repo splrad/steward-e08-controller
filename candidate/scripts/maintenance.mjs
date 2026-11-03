@@ -21,10 +21,13 @@ export async function maintenanceDefinition(file) {
   check(maintenanceWorkflows.includes(file),'WORKFLOW');
   const parsed=YAML.parseDocument(await readFile(join(policyRoot,'.github/workflows',file),'utf8'));
   check(!parsed.errors.length,'DEFINITION');const d=parsed.toJS({maxAliasCount:100}),keys=maintenanceJobKeys(file);
-  check(same(Object.keys(d.jobs).sort(),[...keys].sort()),'DEFINITION_JOBS');
+  const currentKeys=keys.filter(key=>key!=='automation-health'||Object.hasOwn(d.jobs,key));
+  check(same(Object.keys(d.jobs).sort(),[...currentKeys].sort()),'DEFINITION_JOBS');
   const names={};
   for(const key of keys) {
-    const j=d.jobs[key],name=j.name??key;
+    const j=d.jobs[key];
+    if(!j&&key==='automation-health'){names[key]=key;continue;}
+    const name=j.name??key;
     check(typeof name==='string'&&(key==='update'?name==='update (${{ strategy.job-index }})':!name.includes('${{')),'DEFINITION_NAME');
     names[key]=name;
     // A failed health job must never drag successful business jobs into a rerun.

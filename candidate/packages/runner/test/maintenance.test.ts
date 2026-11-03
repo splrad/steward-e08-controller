@@ -51,6 +51,10 @@ it.each(['lost','unknown'])('reconciles a %s response without a second POST from
   const f=await fixture();f.mode=mode;expect((await f.execute()).status).toBe(mode==='lost'?'ACCEPTED':'UNKNOWN');
   expect((await f.execute()).status).toBe(mode==='lost'?'WAIT':'UNKNOWN');expect(f.posts()).toHaveLength(1);
 });
+it.each(['sync-managed.yml','update-dependencies.yml'])('reads a business Run without a health job for %s',async file=>{
+  const f=await fixture(file);f.jobs=f.jobs.filter((j:any)=>j.name!=='automation-health');
+  expect((await f.execute()).status).toBe('ACCEPTED');expect(f.posts()).toHaveLength(1);
+});
 it('stops after two recoveries and three actual failed business waves',async()=>{
   const f=await fixture();expect((await f.execute()).status).toBe('ACCEPTED');
   f.run.status='completed';f.run.conclusion='failure';f.jobs.push(job(2,'settings-sync',2));
@@ -107,13 +111,23 @@ it('fully reads native jobs across pages without publishing matrix names or step
 });
 it.each(['missing-job','matrix-gap','ambiguous-markers'])('does not infer complete business evidence from a failure when %s exists',async kind=>{
   const f=await fixture(kind==='missing-job'?'sync-managed.yml':'update-dependencies.yml');
-  if(kind==='missing-job')f.jobs.pop();
+  if(kind==='missing-job')f.jobs=f.jobs.filter((j:any)=>j.name!=='templates');
   else {
     f.jobs[0].conclusion='success';
     f.jobs[0].steps=[{name:'update-targets-found',conclusion:'success'},{name:'update-targets-empty',conclusion:kind==='ambiguous-markers'?'success':'skipped'}];
     if(kind==='matrix-gap')f.jobs[1].name='update (1)';
   }
   expect((await f.execute()).status).toBe('UNKNOWN');expect(f.posts()).toHaveLength(0);expect(f.saves).toBe(0);
+});
+it.each(['health-only','both-failed','health-rerun'])('keeps sync-managed business recovery separate from %s',async kind=>{
+  const f=await fixture('sync-managed.yml');
+  for(const j of f.jobs)if(j.name!=='automation-health')j.conclusion='success';
+  if(kind==='both-failed')f.jobs.find((j:any)=>j.name==='templates').conclusion='failure';
+  if(kind==='health-rerun'){f.run.run_attempt=2;f.jobs.push(job(4,'automation-health',2));}
+  const result=await f.execute();
+  expect(result.status).toBe(kind==='both-failed'?'ACCEPTED':'SATISFIED');
+  expect(f.posts()).toHaveLength(kind==='both-failed'?1:0);
+  if(kind!=='both-failed')expect(f.saves).toBe(0);
 });
 it.each(['jobs','archive','run-changed','claim-changed','disabled','stale-source'])('withholds POST after %s changes at the native/archive boundary',async kind=>{
   const f=await fixture(),request=f.io.request;

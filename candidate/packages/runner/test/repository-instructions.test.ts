@@ -2,13 +2,17 @@ import {expect,it,vi} from 'vitest';
 import {mkdtemp,readFile,writeFile,mkdir,rm,cp,symlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import {assertRepositoryInstructions} from '../src/repository-instructions.js';
 import {main} from '../src/index.js';
+import {registerOfflineFixtureRoot} from './offline-fixtures.js';
 
 const expected=()=>readFile('templates/repository/AGENTS.md');
 it.each(['missing','edited','crlf','bom','no-newline','extra-newline','directory','link','override','copilot','runtime'])('rejects incomplete or competing instruction carrier: %s',async kind=>{
-  const root=await mkdtemp(join(tmpdir(),'repository-instructions-'));
+  const root=await mkdtemp(join(tmpdir(),'repository-instructions-'));registerOfflineFixtureRoot(root);
   try {
+    execFileSync('git',['init','--quiet'],{cwd:root,windowsHide:true});
     const bytes=await expected(),path=join(root,'AGENTS.md');
     if(kind==='directory')await mkdir(path);
     else if(kind==='link')await symlink(root,path,process.platform==='win32'?'junction':'dir');
@@ -20,6 +24,57 @@ it.each(['missing','edited','crlf','bom','no-newline','extra-newline','directory
     }
     await expect(assertRepositoryInstructions(root,bytes)).rejects.toThrow('INSTRUCTIONS_');
     if(kind==='runtime')expect(await readFile(join(root,'.github/instructions/runtime.instructions.md'),'utf8')).toBe('Human text\n');
+  }finally{await rm(root,{recursive:true,force:true});}
+});
+it.each(['src/AGENTS.md','docs/AGENTS.override.md','.github/instructions/security.instructions.md','sub/.github/copilot-instructions.md'])('finds instruction carriers anywhere in the Git tree: %s',async path=>{
+  const root=await mkdtemp(join(tmpdir(),'repository-instructions-'));registerOfflineFixtureRoot(root);
+  try{
+    execFileSync('git',['init','--quiet'],{cwd:root,windowsHide:true});
+    const bytes=await expected();await writeFile(join(root,'AGENTS.md'),bytes);
+    await mkdir(join(root,path,'..'),{recursive:true});await writeFile(join(root,path),'Retain human content\n');
+    execFileSync('git',['add','--',path],{cwd:root,windowsHide:true});
+    await expect(assertRepositoryInstructions(root,bytes)).rejects.toThrow('INSTRUCTIONS_CARRIER_REQUIRES_MIGRATION');
+    expect(await readFile(join(root,path),'utf8')).toBe('Retain human content\n');
+  }finally{await rm(root,{recursive:true,force:true});}
+});
+it('accepts only the trusted repository and exact old bytes, then rejects them when compatibility closes',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'repository-instructions-'));registerOfflineFixtureRoot(root);
+  try{
+    execFileSync('git',['init','--quiet'],{cwd:root,windowsHide:true});
+    const bytes=await expected(),old=Buffer.from('## Code Review Rules\n\nPrevious approved rules\n');
+    const legacy=[{repositoryId:123,sha256:createHash('sha256').update(old).digest('hex')}];
+    await writeFile(join(root,'AGENTS.md'),old);
+    await expect(assertRepositoryInstructions(root,bytes,{repositoryId:123,legacy})).resolves.toBeUndefined();
+    await expect(assertRepositoryInstructions(root,bytes,{legacy})).rejects.toThrow('INSTRUCTIONS_BYTES_DIFFER');
+    await expect(assertRepositoryInstructions(root,bytes,{repositoryId:124,legacy})).rejects.toThrow('INSTRUCTIONS_BYTES_DIFFER');
+    await expect(assertRepositoryInstructions(root,bytes,{repositoryId:123,legacy:[]})).rejects.toThrow('INSTRUCTIONS_BYTES_DIFFER');
+    await writeFile(join(root,'AGENTS.md'),Buffer.concat([old,Buffer.from('edited\n')]));
+    await expect(assertRepositoryInstructions(root,bytes,{repositoryId:123,legacy})).rejects.toThrow('INSTRUCTIONS_BYTES_DIFFER');
+    await writeFile(join(root,'AGENTS.md'),bytes);
+    await expect(assertRepositoryInstructions(root,bytes,{repositoryId:124,legacy})).resolves.toBeUndefined();
+  }finally{await rm(root,{recursive:true,force:true});}
+});
+it('keeps formatting and extra-carrier rejection during exact legacy compatibility',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'repository-instructions-'));registerOfflineFixtureRoot(root);
+  try{
+    execFileSync('git',['init','--quiet'],{cwd:root,windowsHide:true});const bytes=await expected();
+    const invalid=Buffer.from('## Code Review Rules\r\n');await writeFile(join(root,'AGENTS.md'),invalid);
+    await expect(assertRepositoryInstructions(root,bytes,{repositoryId:123,legacy:[{repositoryId:123,sha256:createHash('sha256').update(invalid).digest('hex')}]})).rejects.toThrow('INSTRUCTIONS_BYTES_DIFFER');
+    await writeFile(join(root,'AGENTS.md'),bytes);await mkdir(join(root,'nested'));await writeFile(join(root,'nested/AGENTS.md'),bytes);
+    execFileSync('git',['add','--','nested/AGENTS.md'],{cwd:root,windowsHide:true});
+    await expect(assertRepositoryInstructions(root,bytes,{repositoryId:123,legacy:[{repositoryId:123,sha256:createHash('sha256').update(bytes).digest('hex')}]})).rejects.toThrow('INSTRUCTIONS_CARRIER_REQUIRES_MIGRATION');
+  }finally{await rm(root,{recursive:true,force:true});}
+});
+it('allows only the trusted central template source and compares its complete bytes',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'repository-instructions-'));registerOfflineFixtureRoot(root);
+  try{
+    execFileSync('git',['init','--quiet'],{cwd:root,windowsHide:true});const bytes=await expected();
+    await writeFile(join(root,'AGENTS.md'),bytes);await mkdir(join(root,'templates/repository'),{recursive:true});await writeFile(join(root,'templates/repository/AGENTS.md'),bytes);
+    execFileSync('git',['add','--','templates/repository/AGENTS.md'],{cwd:root,windowsHide:true});
+    await expect(assertRepositoryInstructions(root,bytes)).rejects.toThrow('INSTRUCTIONS_CARRIER_REQUIRES_MIGRATION');
+    await expect(assertRepositoryInstructions(root,bytes,{templateSource:true})).resolves.toBeUndefined();
+    await writeFile(join(root,'templates/repository/AGENTS.md'),'Candidate supplied template\n');
+    await expect(assertRepositoryInstructions(root,bytes,{templateSource:true})).rejects.toThrow('INSTRUCTIONS_CARRIER_REQUIRES_MIGRATION');
   }finally{await rm(root,{recursive:true,force:true});}
 });
 it.each(['managed-sync','render-review-instructions'])('retired %s cannot reach credentials or transport',async command=>{

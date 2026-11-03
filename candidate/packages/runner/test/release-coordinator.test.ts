@@ -1,11 +1,6 @@
 import { expect, it } from 'vitest';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { readFile, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
-import YAML from 'yaml';
-import { permitOfflineCommand } from './offline-fixtures.js';
 const {coordinateReleaseWake,serviceReleaseWake,fetchState}=await import(pathToFileURL(resolve('scripts/release-coordinator.mjs')).href);
 it('reads Pages state only after validating both governance writers and an unbypassable integrity rule',async()=>{
   const repository={id:12,full_name:'test/product',default_branch:'main'},reads:string[]=[];
@@ -81,34 +76,4 @@ it('isolates inaccessible, archived and disabled repositories without changing t
     service:async(repo:any)=>{serviced.push(repo.id);return {status:'WAIT'};},health:async()=>{}},()=>START);
   expect(observed).toEqual([1,4]);expect(serviced).toEqual([4]);expect(result.counts.unknown).toBe(1);
   expect(JSON.stringify(result)).not.toMatch(/private|denied|403/);expect(result.scanCompletedAt).toBeNull();
-});
-it.skipIf(process.platform==='win32')('executes independent native health against all-attempt fixtures and retains successful no-target entry after health-only rerun',async()=>{
-  const workflow=YAML.parse(await readFile('.github/workflows/release.yml','utf8')),script=workflow.jobs['automation-health'].steps[0].run;
-  const root=await mkdtemp(join(tmpdir(),'native-health-fixture-'));
-  try {
-    const fixture=String.raw`
-gh() {
-  local endpoint='' arg
-  for arg in "$@"; do if [[ "$arg" == repos/* || "$arg" == users/* ]]; then endpoint=$arg; fi; done
-  case "$endpoint" in
-    repos/splrad/steward) printf '%s' '{"id":1296724484,"full_name":"splrad/steward","default_branch":"main","archived":false,"disabled":false}' ;;
-    repos/splrad/steward/actions/runs/1) printf '%s' '{"id":1,"run_attempt":2,"workflow_id":10,"repository":{"id":1296724484},"head_branch":"main","event":"schedule"}' ;;
-    users/*) printf '%s' '{"id":41898282,"type":"Bot"}' ;;
-    repos/splrad/steward/issues*) printf '%s' '[[]]' ;;
-    repos/splrad/steward/actions/workflows/release.yml) printf '%s' '{"id":10,"path":".github/workflows/release.yml","state":"active"}' ;;
-    repos/splrad/steward/actions/workflows/update-dependencies.yml) printf '%s' '{"id":20,"path":".github/workflows/update-dependencies.yml","state":"active"}' ;;
-    repos/splrad/steward/actions/workflows/20/runs*status=*) printf '%s' '[{"total_count":0,"workflow_runs":[]}]' ;;
-    repos/splrad/steward/actions/workflows/20/runs*)
-      data=$(jq -cn --arg now "$(date -u +%FT%TZ)" '{total_count:1,workflow_runs:[{id:2,repository:{id:1296724484},head_repository:{id:1296724484},workflow_id:20,head_branch:"main",event:"schedule",run_attempt:2,created_at:$now,run_started_at:$now}]}')
-      if [[ " $* " == *' --slurp '* ]]; then printf '[%s]' "$data"; else printf '%s' "$data"; fi ;;
-    repos/splrad/steward/actions/runs/2/jobs*)
-      jq -cn --arg now "$(date -u +%FT%TZ)" '[{total_count:2,jobs:[{id:21,name:"targets",run_attempt:1,status:"completed",conclusion:"success",started_at:$now,steps:[{name:"update-targets-empty",conclusion:"success"},{name:"update-targets-found",conclusion:"skipped"}]},{id:22,name:"automation-health",run_attempt:2,status:"completed",conclusion:"failure",started_at:$now}]}]' ;;
-    *) printf 'UNREGISTERED %s\n' "$endpoint" >&2; return 42 ;;
-  esac
-}
-`;
-    const args=['-c',fixture+'\n'+script];permitOfflineCommand('bash',args);
-    const result=spawnSync('bash',args,{env:{...process.env,GH_TOKEN:'offline',DEFAULT_BRANCH:'main',CURRENT_RUN_ID:'1',CURRENT_ATTEMPT:'2'},cwd:root,encoding:'utf8',timeout:20_000});
-    expect(result.status,result.stderr).toBe(0);expect(result.stdout).toBe('');
-  }finally {await rm(root,{recursive:true,force:true});}
 });
