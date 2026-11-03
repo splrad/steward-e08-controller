@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import child from 'node:child_process';
 import {syncBuiltinESMExports} from 'node:module';
 import {promisify} from 'node:util';
-import {mkdtemp,mkdir,writeFile,readFile,copyFile,rm,realpath} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,copyFile,rm,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 import {prepareRuntime} from './prepare-runtime.mjs';
-import {auditedLegacyFiles,fixtureHead,fixtureRepository,fixtureRepositoryId,auditFixtureSnapshot} from './legacy-state-fixture.mjs';
+import {fixtureHead,fixtureRepository,fixtureRepositoryId,auditFixtureSnapshot} from './legacy-state-fixture.mjs';
 import {releaseProtectionFixture} from '../packages/runner/test/fixtures/release-protection.ts';
 
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),roots=[];
