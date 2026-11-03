@@ -2,8 +2,10 @@ import { mkdtemp, mkdir, writeFile, readFile, rename, rm } from 'node:fs/promise
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { it, expect, afterEach, vi } from 'vitest';
-import { discoverWorkflowFiles, scanWorkflows } from '../src/workflow-tools.js';
+import { discoverWorkflowFiles, scanWorkflows as scanWithPolicyTools } from '../src/workflow-tools.js';
 import YAML from 'yaml';
+const runtimeRoot = resolve(process.env.STEWARD_TEST_TOOLCHAIN_ROOT ?? '.');
+const scanWorkflows = (workspace: string, paths: readonly string[]) => scanWithPolicyTools(workspace, paths, runtimeRoot);
 
 const state = vi.hoisted(() => ({ missing: false, extraEntry: 'none', calls: [] as { command: string; args: string[]; env: Record<string, string> }[] }));
 // This integration file permits only mise's read-only lookup and the offline
@@ -56,7 +58,7 @@ it('binds native lock graph trust to the policy and ignores only inactive instal
   vi.stubEnv('MISE_TRUSTED_CONFIG_PATHS', root);
   state.extraEntry = 'inactive';
   await expect(scanWorkflows(root, ['.github/workflows/test.yml'])).resolves.toMatchObject({ results: [{status:0},{status:0}] });
-  expect(state.calls.every(call => call.env.MISE_TRUSTED_CONFIG_PATHS === resolve('.'))).toBe(true);
+  expect(state.calls.every(call => call.env.MISE_TRUSTED_CONFIG_PATHS === runtimeRoot)).toBe(true);
   state.extraEntry = 'active';
   await expect(scanWorkflows(root, ['.github/workflows/test.yml'])).rejects.toThrow('provision the trusted mise lock');
 }, 120000);
