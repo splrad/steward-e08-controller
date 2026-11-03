@@ -77,6 +77,33 @@ it('allows only the trusted central template source and compares its complete by
     await expect(assertRepositoryInstructions(root,bytes,{templateSource:true})).rejects.toThrow('INSTRUCTIONS_CARRIER_REQUIRES_MIGRATION');
   }finally{await rm(root,{recursive:true,force:true});}
 });
+it('admits the next central template only through the earlier trusted repository/digest transition',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'repository-instructions-'));registerOfflineFixtureRoot(root);
+  try{
+    execFileSync('git',['init','--quiet'],{cwd:root,windowsHide:true});
+    const current=await expected(),next=Buffer.from('## Code Review Rules\n\nNext separately approved template\n');
+    const legacy=[{repositoryId:123,sha256:createHash('sha256').update(next).digest('hex')}];
+    await writeFile(join(root,'AGENTS.md'),next);await mkdir(join(root,'templates/repository'),{recursive:true});
+    const template=join(root,'templates/repository/AGENTS.md');await writeFile(template,next);
+    execFileSync('git',['add','--','AGENTS.md','templates/repository/AGENTS.md'],{cwd:root,windowsHide:true});
+    // The earlier trusted validator still has current bytes while reviewing the
+    // approved next template. The candidate cannot authorize its own digest.
+    await expect(assertRepositoryInstructions(root,current,{repositoryId:123,legacy,templateSource:true})).resolves.toBeUndefined();
+    await expect(assertRepositoryInstructions(root,current,{repositoryId:124,legacy,templateSource:true})).rejects.toThrow('INSTRUCTIONS_BYTES_DIFFER');
+    await expect(assertRepositoryInstructions(root,current,{repositoryId:123,legacy:[],templateSource:true})).rejects.toThrow('INSTRUCTIONS_BYTES_DIFFER');
+    await expect(assertRepositoryInstructions(root,current,{repositoryId:123,legacy})).rejects.toThrow('INSTRUCTIONS_CARRIER_REQUIRES_MIGRATION');
+    await writeFile(join(root,'AGENTS.md'),current);
+    await expect(assertRepositoryInstructions(root,current,{repositoryId:124,legacy,templateSource:true})).rejects.toThrow('INSTRUCTIONS_CARRIER_REQUIRES_MIGRATION');
+    await writeFile(template,Buffer.concat([next,Buffer.from('Candidate edit\n')]));
+    await expect(assertRepositoryInstructions(root,current,{repositoryId:123,legacy,templateSource:true})).rejects.toThrow('INSTRUCTIONS_CARRIER_REQUIRES_MIGRATION');
+    const malformed=Buffer.from(next.toString().replaceAll('\n','\r\n'));await writeFile(template,malformed);
+    await expect(assertRepositoryInstructions(root,current,{repositoryId:123,legacy:[{repositoryId:123,sha256:createHash('sha256').update(malformed).digest('hex')}],templateSource:true})).rejects.toThrow('INSTRUCTIONS_CARRIER_REQUIRES_MIGRATION');
+    await writeFile(join(root,'AGENTS.md'),next);await writeFile(template,next);
+    await expect(assertRepositoryInstructions(root,next,{repositoryId:123,legacy:[],templateSource:true})).resolves.toBeUndefined();
+    await writeFile(template,current);
+    await expect(assertRepositoryInstructions(root,next,{repositoryId:123,legacy:[],templateSource:true})).rejects.toThrow('INSTRUCTIONS_CARRIER_REQUIRES_MIGRATION');
+  }finally{await rm(root,{recursive:true,force:true});}
+});
 it.each(['managed-sync','render-review-instructions'])('retired %s cannot reach credentials or transport',async command=>{
   const network=vi.fn(()=>{throw Error('No transport');});vi.stubGlobal('fetch',network);vi.stubEnv('STEWARD_APP_PRIVATE_KEY','');
   try{await expect(main([command])).rejects.toThrow('未知命令');expect(network).not.toHaveBeenCalled();}

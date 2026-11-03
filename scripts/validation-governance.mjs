@@ -1,6 +1,7 @@
 import {readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import YAML from 'yaml';
+import {assertFixtureInstructions} from './instruction-fixture-projection.mjs';
 import {validationInput,git,regular} from './validation-input.mjs';
 import {assertRepositoryInstructions,discoverWorkflowFiles,scanWorkflows} from '../packages/runner/dist/index.js';
 const workspace=resolve(process.env.VALIDATION_WORKSPACE??'target');
@@ -11,6 +12,10 @@ const {input,files}=await validationInput(workspace);
     const text=await readFile(await regular(workspace,path),'utf8');
     if(path.endsWith('.json'))JSON.parse(text);else YAML.parse(text);
   }
-  await assertRepositoryInstructions(workspace,await readFile(new URL('../templates/repository/AGENTS.md',import.meta.url)));
+  const legacy=JSON.parse(await readFile(new URL('../config/review/legacy-instructions.json',import.meta.url),'utf8'));
+  const expected=await readFile(new URL('../templates/repository/AGENTS.md',import.meta.url));
+  const transition={repositoryId:input.repositoryId,legacy,templateSource:process.env.GITHUB_REPOSITORY===process.env.WORKFLOW_REPOSITORY};
+  if(input.repositoryId===1440689456)await assertFixtureInstructions(workspace,expected,transition);
+  else await assertRepositoryInstructions(workspace,expected,transition);
   console.log(JSON.stringify(await scanWorkflows(workspace,await discoverWorkflowFiles(workspace,true)),null,2));
 }catch(error){console.error(error.message);process.exitCode=1;}
