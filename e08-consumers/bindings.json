@@ -62,8 +62,8 @@
     "packages/runner/test/quality-language-summary.test.ts": "c4ef76863ab8a502a119b6fb73c7485964fea7a80670cb830a4ebdc37a13911a",
     "packages/core/src/release-observation.ts": "4d7cb159922973b08b59171c8ad4bf15282f726235abcff92fbc200513a091d2",
     "packages/core/test/quality-language-summary.test.ts": "f0c17e65739b42350377eb7bb028b02c066655e8a8efb6d3d2189fa7ed040871",
-    "tools/template/actions_lock.py": "c98c79507afd95b4b5785c0032d9602931c359f598b03cebb184bc4ab7786352",
-    "tools/template/test_actions_lock.py": "ace1811ff2c4dfff89427c7cedb6876f057d5acede6d977ae9132697600146e0",
+    "tools/template/actions_lock.py": "3c8aaa4fe210ddc8a0c980c5c8b74d164c02abcf44ba67451447ef694793b7fd",
+    "tools/template/test_actions_lock.py": "7e957582a20d0ee6514870956dd0b5f1898859ebe05eb52d1e1f5c9f26cd4572",
     "tools/template/copier_bridge.py": "54bb47cb6480fc7f0c47399175492927e79cfe1d912da41128bd08260983b23b",
     "config/actions-lock-version.txt": "cc11b28a7a883e61ff0d2ea9d6c61e0efa0e1655fa6b9175e379445bec8c1c55",
     "packages/runner/test/template-delivery.test.ts": "db18797c414b80ab9d86dfb7d788230f965de605d8f05da55bf59d1ca89d33f8"
@@ -87,14 +87,14 @@
     "toolVersionSource": "config/actions-lock-version.txt",
     "sourceFiles": {
       "tools/template/actions_lock.py": {
-        "source": "c98c79507afd95b4b5785c0032d9602931c359f598b03cebb184bc4ab7786352",
-        "candidate": "c98c79507afd95b4b5785c0032d9602931c359f598b03cebb184bc4ab7786352",
-        "bound": "c98c79507afd95b4b5785c0032d9602931c359f598b03cebb184bc4ab7786352"
+        "source": "3c8aaa4fe210ddc8a0c980c5c8b74d164c02abcf44ba67451447ef694793b7fd",
+        "candidate": "3c8aaa4fe210ddc8a0c980c5c8b74d164c02abcf44ba67451447ef694793b7fd",
+        "bound": "3c8aaa4fe210ddc8a0c980c5c8b74d164c02abcf44ba67451447ef694793b7fd"
       },
       "tools/template/test_actions_lock.py": {
-        "source": "ace1811ff2c4dfff89427c7cedb6876f057d5acede6d977ae9132697600146e0",
-        "candidate": "ace1811ff2c4dfff89427c7cedb6876f057d5acede6d977ae9132697600146e0",
-        "bound": "ace1811ff2c4dfff89427c7cedb6876f057d5acede6d977ae9132697600146e0"
+        "source": "7e957582a20d0ee6514870956dd0b5f1898859ebe05eb52d1e1f5c9f26cd4572",
+        "candidate": "7e957582a20d0ee6514870956dd0b5f1898859ebe05eb52d1e1f5c9f26cd4572",
+        "bound": "7e957582a20d0ee6514870956dd0b5f1898859ebe05eb52d1e1f5c9f26cd4572"
       },
       "tools/template/delivery.py": {
         "source": "28b2b8848698fbecc325c172ff9a222d0ef2c7168008b8e8608a2cbd913706db",

@@ -107,6 +107,47 @@ class LockTests(unittest.TestCase):
         with self.assertRaisesRegex(lock.LockFailure, 'UNRELATED_DEPENDENCY'):
             lock.prepare(self.root, before, tool)
 
+    def test_initial_and_incremental_locks_reject_unreachable_global_entries(self):
+        for existing in [False, True]:
+            with self.subTest(existing=existing), tempfile.TemporaryDirectory(dir=self.root) as folder:
+                target = Path(folder)
+                path = target / '.github/workflows/managed.yml'
+                path.parent.mkdir(parents=True)
+                path.write_text(YAML, encoding='utf-8')
+                if existing:
+                    fixture_tool('generate', target)
+                before = bridge.paths_in_tree(target)
+                if existing:
+                    path.write_text(YAML.replace(SHA, 'b' * 40), encoding='utf-8')
+                def tool(mode, directory):
+                    if mode == 'generate':
+                        value = fixture_document(directory)
+                        entry = next(iter(value['dependencies'].values()))
+                        value['dependencies']['actions/checkout@unused'] = {**entry, 'ref': 'unused'}
+                        (directory / lock.LOCK).write_text(yaml.safe_dump(value), encoding='utf-8')
+                    # The official v0.4.0 --verify accepts an unreachable global entry.
+                with self.assertRaisesRegex(lock.LockFailure, 'UNREACHABLE_DEPENDENCY'):
+                    lock.prepare(target, before, tool)
+
+    def test_reachable_transitive_entries_are_preserved_and_missing_edges_fail(self):
+        before = bridge.paths_in_tree(self.root)
+        value = fixture_document(self.root)
+        root = next(iter(value['dependencies']))
+        child = 'shared/action@v1'
+        value['dependencies'][root]['uses'] = [child]
+        value['dependencies'][child] = {'ref': 'v1', 'commit': 'sha1-' + 'b' * 40, 'owner_id': 2, 'repo_id': 3}
+        def tool(mode, target):
+            if mode == 'generate':
+                self.save_lock(value)
+            else:
+                self.assertEqual(lock.document((target / lock.LOCK).read_bytes()), value)
+        self.assertEqual(lock.prepare(self.root, before, tool)['status'], 'VERIFIED')
+        self.assertEqual(lock.document((self.root / lock.LOCK).read_bytes()), value)
+        existing = bridge.paths_in_tree(self.root)
+        del value['dependencies'][child]
+        with self.assertRaisesRegex(lock.LockFailure, 'DEPENDENCY_MISSING'):
+            lock.prepare(self.root, existing, tool)
+
     def test_explicit_managed_pin_update_under_same_ref_preserves_unaffected_shared_entries(self):
         def branch_tool(mode, target):
             value = fixture_document(target)

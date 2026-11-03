@@ -52,9 +52,25 @@ def document(raw):
         require(isinstance(key, str) and isinstance(entry, dict)
                 and isinstance(entry.get('ref'), str) and entry['ref']
                 and re.fullmatch(r'sha1-[a-f0-9]{40}', entry.get('commit', ''))
+                and isinstance(entry.get('uses', []), list)
+                and all(isinstance(child, str) for child in entry.get('uses', []))
                 and all(type(entry.get(k)) is int and entry[k] > 0 for k in ['owner_id', 'repo_id']), 'DEPENDENCY_SCHEMA')
     require(all(key in value['dependencies'] for values in value['workflows'].values() for key in values), 'DEPENDENCY_MISSING')
     return value
+
+
+def check_graph(lock):
+    """Every generated entry must be reachable from a workflow, including composite edges."""
+    pending = [key for roots in lock['workflows'].values() for key in roots]
+    reached = set()
+    while pending:
+        key = pending.pop()
+        if key in reached:
+            continue
+        require(key in lock['dependencies'], 'DEPENDENCY_MISSING')
+        reached.add(key)
+        pending.extend(lock['dependencies'][key].get('uses', []))
+    require(reached == set(lock['dependencies']), 'UNREACHABLE_DEPENDENCY')
 
 
 def check_rewrite(original, generated, dependencies, path=()):
@@ -139,6 +155,7 @@ def prepare(target, before_copier, run):
     require(LOCK in generated, 'MISSING')
     lock = document(generated[LOCK])
     require(set(lock['workflows']) == names, 'FULL_TREE_COVERAGE')
+    check_graph(lock)
     changed = {p for p in original.keys() | generated.keys() if original.get(p) != generated.get(p)}
     require(changed <= names | {LOCK}, 'UNEXPECTED_FILE')
     for name in names & changed:
