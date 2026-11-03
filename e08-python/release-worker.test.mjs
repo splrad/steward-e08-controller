@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {executionContext,centralReadOnly,verifyCentral,main} from './release-worker.mjs';
+import {executionContext,centralReadOnly,verifyCentral,main,productEvidenceIo} from './release-worker.mjs';
+import {NativeEvidenceReader} from './native/index.js';
 
 const central='splrad/steward-e08-controller',id=1440689456,sha='a'.repeat(40);
 const env={GITHUB_REPOSITORY:central,GITHUB_REPOSITORY_ID:String(id),GITHUB_REF:'refs/heads/e08-channel-trunk',GITHUB_EVENT_NAME:'workflow_dispatch',
@@ -42,4 +43,42 @@ test('native central evidence must match exact run attempt, checkout, workflow a
     await assert.rejects(verifyCentral(executionContext(env),fixture(repository,changed,workflow)),/E08_NATIVE_CENTRAL_IDENTITY/);
   await assert.rejects(verifyCentral(executionContext(env),fixture({...repository,archived:true},run,workflow)),/E08_NATIVE_CENTRAL_IDENTITY/);
   await assert.rejects(verifyCentral(executionContext(env),fixture(repository,run,{...workflow,state:'disabled_manually'})),/E08_NATIVE_CENTRAL_IDENTITY/);
+});
+
+test('PR adoption and recovery reads use the read-only credential; release operations keep their original credential',()=>{
+  const calls=[];
+  const transport=kind=>({request:(method,path)=>{calls.push({kind,method,path});return kind;}});
+  const io=productEvidenceIo(transport('release'),transport('pr-read')),prefix='/repos/splrad/steward-e08-product/';
+  for(const path of ['pulls/1','pulls?state=closed&per_page=100','pulls/1/files','commits/'+sha+'/pulls?page=1','issues/1/events?page=2','issues/events/24'])
+    assert.equal(io.request('GET',prefix+path),'pr-read');
+  for(const [method,path] of [['POST','pulls'],['PUT','pulls/1/merge'],['GET','git/ref/heads/steward/release-state'],['GET','rulesets'],['GET','actions/runs/123'],['POST','actions/workflows/test.yml/dispatches']])
+    assert.equal(io.request(method,prefix+path),'release');
+  assert.equal(io.request('GET','/repos/splrad/steward/pulls/1'),'release');
+  assert(calls.filter(c=>c.kind==='pr-read').every(c=>c.method==='GET'&&c.path.startsWith(prefix)));
+});
+test('routed evidence retains native streaming digest and Run-page readers',async()=>{
+  const release={request:()=>{},downloadDigest:async()=>({digest:sha}),readRunPage:async()=>({status:200})};
+  const io=productEvidenceIo(release,{request:()=>{throw Error('Unexpected PR read');}});
+  assert.equal(io.downloadDigest,release.downloadDigest);assert.equal(io.readRunPage,release.readRunPage);
+  assert.deepEqual(await io.downloadDigest(),{digest:sha});assert.deepEqual(await io.readRunPage(),{status:200});
+});
+for(const failPage of [false,true])test(`native missing merge SHA is completed using PR events across read-only pages; second page denied=${failPage}`,async()=>{
+  const repository='splrad/steward-e08-product',root=`https://api.github.com/repos/${repository}`,calls=[];
+  const pull={id:7,number:7,url:root+'/pulls/7',base:{repo:{full_name:repository,id:1440689534}},state:'closed',merged:true,merged_at:'2026-11-03T00:00:00Z'};
+  const read={request:async(method,path)=>{
+    calls.push(path);assert.equal(method,'GET');
+    const headers=new Headers();let body,status=200;
+    if(path.endsWith('/pulls/7'))body=pull;
+    else if(path.endsWith('/issues/7/events?per_page=100')){
+      body=[{id:1,event:'labeled'}];headers.set('link',`<${root}/issues/7/events?per_page=100&page=2>; rel="next"`);
+    }else if(path.endsWith('/issues/7/events?per_page=100&page=2')){
+      status=failPage?403:200;
+      body=[{id:2,event:'merged',url:root+'/issues/events/2',commit_id:sha,commit_url:root+'/commits/'+sha,actor:{id:44151430},created_at:'2026-11-03T00:00:00Z'}];
+    }else throw Error('Unexpected evidence path');
+    return {status,headers,bytes:Buffer.from(JSON.stringify(body))};
+  }};
+  const reader=new NativeEvidenceReader(productEvidenceIo({request:()=>{throw Error('PR evidence leaked to release writer');}},read),repository);
+  if(failPage)await assert.rejects(reader.json('pulls/7'));
+  else {const completed=await reader.json('pulls/7');assert.equal(completed.merge_commit_sha,sha);assert.equal(completed.merge_commit_evidence.id,2);}
+  assert.equal(calls.length,3);assert.equal(Object.hasOwn(pull,'merge_commit_sha'),false);
 });

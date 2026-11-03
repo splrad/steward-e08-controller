@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {nativeReleaseApp,nativeEvidenceTransport,nativeRunFact,isolatedBuildEnvironment} from './native/index.js';
+import {nativeReleaseApp,nativeEvidenceTransport,nativeRunFact,isolatedBuildEnvironment,NativeEvidenceReader} from './native/index.js';
 import {fixtureRepository,fixtureRepositoryId,auditFixtureSnapshot} from './legacy-state-fixture.mjs';
 
 const controller='splrad/steward-e08-controller',controllerId=1440689456,branch='e08-channel-trunk';
@@ -22,6 +22,16 @@ export function centralReadOnly(transport) {
   return {request(method,path,...args) {
     if(method!=='GET'||typeof path!=='string'||!path.startsWith(`/repos/${controller}/`)&&path!==`/repos/${controller}`
       ||path.includes('..')||/[\\\0]/.test(path)||/%(?:2e|2f|5c)/i.test(path))throw Error('E08_CENTRAL_READ_ONLY');
+    return transport.request(method,path,...args);
+  }};
+}
+export function productEvidenceIo(releaseIo,prReadIo) {
+  const prefix=`/repos/${fixtureRepository}/`;
+  return {...releaseIo,request(method,path,...args) {
+    const suffix=typeof path==='string'&&path.startsWith(prefix)?path.slice(prefix.length):'';
+    const prRead=/^pulls(?:\/|\?|$)/.test(suffix)||/^commits\/[a-f0-9]{40}\/pulls(?:\?|$)/.test(suffix)
+      ||/^issues\/(?:[1-9][0-9]*\/events|events\/[1-9][0-9]*)(?:\?|$)/.test(suffix);
+    const transport=method==='GET'&&prRead?prReadIo:releaseIo;
     return transport.request(method,path,...args);
   }};
 }
@@ -51,31 +61,33 @@ export async function main(env=process.env) {
     const {fetchState,serviceReleaseWake}=await import('../.e08-python-runtime/scripts/release-coordinator.mjs');
     const {initializeReleaseAdoption}=await import('../.e08-python-runtime/scripts/release-adoption.mjs');
     const {releaseCommand}=await import('../.e08-python-runtime/scripts/release-record.mjs');
-    return await app.forRepository(fixtureRepositoryId,async token=>{
+    return await app.forRepository(fixtureRepositoryId,async token=>app.forCandidateReadRepository(fixtureRepositoryId,async prReadToken=>{
       const repository={id:fixtureRepositoryId,full_name:fixtureRepository,default_branch:'main'};
-      const writeDirectory=await mkdtemp(join(root,'writes-'));let state;
+      const writeDirectory=await mkdtemp(join(root,'writes-'));let state,io;
+      const prReadIo=nativeEvidenceTransport(prReadToken);
       const request={directory:'',writeDirectory,remote:`https://github.com/${fixtureRepository}.git`,repository:fixtureRepository,repositoryId:fixtureRepositoryId,
         defaultBranch:'main',appBotId:app.appBotId,cycleId:null,runId:null,identity:{name:app.appBotLogin,email:`${app.appBotId}+${app.appBotLogin}@users.noreply.github.com`}};
       const refresh=async()=>{
         state=await fetchState(root,repository,token);request.directory=state.directory;
+        io=productEvidenceIo(state.io,prReadIo);
         await auditFixtureSnapshot(request,state.snapshot.head);return state.snapshot;
       };
       await refresh();
-      const pull=await json(state.io,`/repos/${fixtureRepository}/pulls/${context.adoptionPr}`);
+      const pull=await new NativeEvidenceReader(io,fixtureRepository).json(`pulls/${context.adoptionPr}`);
       if(pull.number!==context.adoptionPr||pull.merged!==true||!/^[a-f0-9]{40}$/.test(pull.merge_commit_sha??''))throw Error('E08_MERGED_ADOPTION_REQUIRED');
       const {cycleId,runId,...adoptionRequest}=request;
-      const adoption=await initializeReleaseAdoption({...adoptionRequest,releaseAdoption:{sourceSha:pull.merge_commit_sha,prNumber:context.adoptionPr}},{token,io:state.io,centralIo});
+      const adoption=await initializeReleaseAdoption({...adoptionRequest,releaseAdoption:{sourceSha:pull.merge_commit_sha,prNumber:context.adoptionPr}},{token,io,centralIo});
       if(!['APPLIED','UNCHANGED'].includes(adoption.status))throw Error('E08_ADOPTION_UNCONFIRMED');
       const result=await serviceReleaseWake(request,refresh,async(command,input)=>command==='candidate'
         ?app.forCandidateRepository(fixtureRepositoryId,(candidateToken,candidateReadToken)=>releaseCommand(command,{...input,directory:request.directory},
-          {token:candidateToken,io:state.io,centralIo,candidateReadToken,controllerSha:context.controllerSha,controllerDirectory:sourceRoot}))
-        :releaseCommand(command,{...input,directory:request.directory},{token,io:state.io,centralIo,controllerDirectory:sourceRoot,
+          {token:candidateToken,io,centralIo,candidateReadToken,controllerSha:context.controllerSha,controllerDirectory:sourceRoot}))
+        :releaseCommand(command,{...input,directory:request.directory},{token,io,centralIo,controllerDirectory:sourceRoot,
           centralInvocation:{runId:context.runId,runAttempt:context.runAttempt,controllerSha:context.controllerSha,defaultBranch:branch}}));
       const snapshot=await refresh();
       return {schemaVersion:1,scope:'E08 Python fixture only',contentSdk:'E08_FIXED_NO_MODEL',context,repository:fixtureRepository,repositoryId:fixtureRepositoryId,
         adoption,result,stateHead:snapshot.head,revision:snapshot.repository.revision,activeCycleId:snapshot.repository.activeCycleId,
         candidate:snapshot.repository.candidate,cycleIds:snapshot.cycles.map(record=>record.value.id)};
-    });
+    }));
   }finally{await rm(root,{recursive:true,force:true});}
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href) {
