@@ -9,6 +9,7 @@ import tarfile
 import zipfile
 import zlib
 import tomllib
+import re
 
 from packaging.metadata import Metadata
 from packaging.utils import canonicalize_name, parse_sdist_filename, parse_wheel_filename
@@ -162,9 +163,35 @@ def inspect_sdist_members(archive, root, seen, files):
     return metadata
 
 
+def stage(path, destination):
+    """Validate the finite distribution first, then use native archive extraction."""
+    version = inspect(path)
+    require(not destination.exists())
+    # Extraction must be portable on the Windows evidence runner as well.
+    def portable(names):
+        for name in names:
+            for part in name.rstrip('/').split('/'):
+                require(not re.search(r'[<>"|?*]', part))
+                require(not part.endswith(('.', ' ')))
+                require(not re.match(r'^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?:\.|$)', part, re.I))
+    if path.name.endswith('.whl'):
+        with zipfile.ZipFile(path) as archive:
+            portable(archive.namelist())
+            destination.mkdir()
+            archive.extractall(destination)
+    else:
+        with tarfile.open(path, 'r:gz') as archive:
+            portable(member.name for member in archive)
+            destination.mkdir()
+            archive.extractall(destination, filter='data')
+    return version
+
+
 if __name__ == "__main__":
     try:
-        if len(sys.argv) == 4 and sys.argv[1] == "--source-version":
+        if len(sys.argv) == 4 and sys.argv[1] == "--stage":
+            version = stage(Path(sys.argv[2]), Path(sys.argv[3]))
+        elif len(sys.argv) == 4 and sys.argv[1] == "--source-version":
             data = Path(sys.argv[2]).read_bytes()
             require(len(data) <= MAX_METADATA)
             document = tomllib.loads(data.decode("utf-8"))

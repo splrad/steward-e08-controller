@@ -56,6 +56,30 @@ for(const kind of ['whl','tar.gz'])it.each(modes)(`${kind} rejects %s`,async mod
   await writeFile(config,JSON.stringify({source,output,mode}));
   await promisify(execFile)(python,['-I',mutation,config],{env:isolatedBuildEnvironment(process.env,f.root),cwd:f.root,timeout:30000,windowsHide:true});
   await expect(f.inspector.inspectPath!(output)).rejects.toBeInstanceOf(BuildContractError);
+  const staged=join(f.root,'sbom-staging');
+  await expect(promisify(execFile)(python,['-I',helper,'--stage',output,staged],{env:isolatedBuildEnvironment(process.env,f.root),cwd:f.root,timeout:30000,windowsHide:true})).rejects.toMatchObject({code:2});
+  await expect(access(staged)).rejects.toMatchObject({code:'ENOENT'});
+},30000);
+it.each(['1.2.3','1.2.4rc1'])('stages actual %s wheel/sdist bytes without executing package code',async version=>{
+  const f=await fixture(version);
+  for(const asset of f.selected){
+    const staged=join(f.root,asset.file),config=join(f.root,'mutation.json'),output=join(f.out,asset.file);
+    await writeFile(config,JSON.stringify({source:join(fixtures,asset.file),output,mode:'no-execution'}));
+    await promisify(execFile)(python,['-I',mutation,config],{env:isolatedBuildEnvironment(process.env,f.root),cwd:f.root,timeout:30000,windowsHide:true});
+    const {stdout}=await promisify(execFile)(python,['-I',helper,'--stage',output,staged],{env:isolatedBuildEnvironment(process.env,f.root),cwd:f.root,timeout:30000,windowsHide:true});
+    expect(JSON.parse(stdout).version).toBe(version);
+    const prefix=asset.file.endsWith('.whl')?'':asset.file.slice(0,-7)+'/';
+    expect(await readFile(join(staged,prefix+'untrusted.py'),'utf8')).toContain('must not run');
+    await expect(promisify(execFile)(python,['-I',helper,'--stage',output,staged],{env:isolatedBuildEnvironment(process.env,f.root),cwd:f.root,timeout:30000,windowsHide:true})).rejects.toMatchObject({code:2});
+  }
+},30000);
+it.each(['whl','tar.gz'])('rejects Windows-normalized %s collisions before creating staging',async kind=>{
+  const f=await fixture(),asset=f.selected.find(a=>a.file.endsWith('.'+kind))!,output=join(f.out,asset.file),config=join(f.root,'mutation.json'),staged=join(f.root,'sbom-staging');
+  await writeFile(config,JSON.stringify({source:join(fixtures,asset.file),output,mode:'windows-normalization'}));
+  await promisify(execFile)(python,['-I',mutation,config],{env:isolatedBuildEnvironment(process.env,f.root),cwd:f.root,timeout:30000,windowsHide:true});
+  expect(await f.inspector.inspectPath!(output)).toBe('1.2.3');
+  await expect(promisify(execFile)(python,['-I',helper,'--stage',output,staged],{env:isolatedBuildEnvironment(process.env,f.root),cwd:f.root,timeout:30000,windowsHide:true})).rejects.toMatchObject({code:2});
+  await expect(access(staged)).rejects.toMatchObject({code:'ENOENT'});
 },30000);
 it.each(['whl','tar.gz'])('normalizes official name/version metadata in %s without importing its code',async kind=>{
   const f=await fixture('1.2.4rc1'),asset=f.selected.find(a=>a.file.endsWith('.'+kind))!,output=join(f.out,asset.file),config=join(f.root,'mutation.json');
