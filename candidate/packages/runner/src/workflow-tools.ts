@@ -9,20 +9,21 @@ const policyRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const toolIds = { jactionlint: 'github:jdx/jactionlint', zizmor: 'aqua:zizmorcore/zizmor',
   shellcheck: 'aqua:koalaman/shellcheck', pyflakes: 'pypi:pyflakes', python: 'python' } as const;
 
-export async function assertPolicyNodeVersion(): Promise<void> {
-  const inventory = JSON.parse(run('mise', ['ls', '--json'], policyRoot, toolEnvironment()));
+export async function assertPolicyNodeVersion(runtimeRoot = policyRoot): Promise<void> {
+  runtimeRoot = resolve(runtimeRoot);
+  const inventory = JSON.parse(run('mise', ['ls', '--json'], runtimeRoot, toolEnvironment(runtimeRoot)));
   const node = inventory.node?.filter((entry: any) => entry.active === true);
   if (!Array.isArray(node) || node.length !== 1 || !node[0].installed || !node[0].active
-    || resolve(node[0].source?.path ?? '') !== join(policyRoot, 'mise.toml') || node[0].version !== process.versions.node) {
+    || resolve(node[0].source?.path ?? '') !== join(runtimeRoot, 'mise.toml') || node[0].version !== process.versions.node) {
     throw new Error('Node does not match trusted mise lock');
   }
   const rel = relative(await realpath(node[0].install_path), await realpath(process.execPath));
   if (!rel || rel.startsWith('..') || isAbsolute(rel)) throw new Error('Node executable outside trusted installation');
 }
 
-function toolEnvironment(): NodeJS.ProcessEnv {
+function toolEnvironment(runtimeRoot = policyRoot): NodeJS.ProcessEnv {
   const clean: NodeJS.ProcessEnv = { MISE_SAFE: '1', MISE_LOCKED: '1', MISE_NODE_COMPILE: 'false',
-    MISE_TRUSTED_CONFIG_PATHS: policyRoot };
+    MISE_TRUSTED_CONFIG_PATHS: runtimeRoot };
   for (const key of ['PATH', 'Path', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'HOME', 'LANG',
     'MISE_DATA_DIR', 'MISE_CONFIG_DIR', 'MISE_CACHE_DIR', 'MISE_STATE_DIR', 'MISE_SYSTEM_CONFIG_DIR', 'MISE_GLOBAL_CONFIG_FILE']) {
     if (process.env[key]) clean[key] = process.env[key];
@@ -56,36 +57,38 @@ function acceptedTrigger(root: string, finding: any, files: readonly string[]): 
     && route === JSON.stringify([{ Key: 'on' }, { Key: 'workflow_run' }])) return 'E07-PROMOTION-WORKFLOW-RUN-20261031';
   return null;
 }
-export async function resolvePolicyTool(name: 'syft' | 'gh' | 'lychee' | 'oras' | 'uv'): Promise<string> {
+export async function resolvePolicyTool(name: 'syft' | 'gh' | 'lychee' | 'oras' | 'uv', runtimeRoot = policyRoot): Promise<string> {
+  runtimeRoot = resolve(runtimeRoot);
   const ids = { syft: 'aqua:anchore/syft', gh: 'aqua:cli/cli', lychee: 'aqua:lycheeverse/lychee', oras: 'aqua:oras-project/oras', uv: 'aqua:astral-sh/uv' };
-  const env = toolEnvironment(), inventory = JSON.parse(run('mise', ['ls', '--json'], policyRoot, env));
+  const env = toolEnvironment(runtimeRoot), inventory = JSON.parse(run('mise', ['ls', '--json'], runtimeRoot, env));
   const entries = inventory[ids[name]]?.filter((entry: any) => entry.active === true);
   if (!Array.isArray(entries) || entries.length !== 1 || !entries[0].installed || !entries[0].active
-    || resolve(entries[0].source?.path ?? '') !== join(policyRoot, 'mise.toml')) throw new Error(`${name}: missing trusted locked tool`);
-  const executable = await realpath(run('mise', ['which', name], policyRoot, env).trim());
+    || resolve(entries[0].source?.path ?? '') !== join(runtimeRoot, 'mise.toml')) throw new Error(`${name}: missing trusted locked tool`);
+  const executable = await realpath(run('mise', ['which', name], runtimeRoot, env).trim());
   const rel = relative(await realpath(entries[0].install_path), executable);
   if (!rel || rel.startsWith('..') || isAbsolute(rel)) throw new Error(`${name}: outside trusted installation`);
-  if (!run(executable, ['--version'], policyRoot, env).split(/\s+/).includes(entries[0].version)) throw new Error(`${name}: locked version mismatch`);
+  if (!run(executable, ['--version'], runtimeRoot, env).split(/\s+/).includes(entries[0].version)) throw new Error(`${name}: locked version mismatch`);
   return executable;
 }
 
 /** Resolve only the trusted policy's installed lock; never load the scanned repository's config. */
-export async function resolveWorkflowTools() {
-  const env = toolEnvironment();
-  const inventory = JSON.parse(run('mise', ['ls', '--json'], policyRoot, env));
+export async function resolveWorkflowTools(runtimeRoot = policyRoot) {
+  runtimeRoot = resolve(runtimeRoot);
+  const env = toolEnvironment(runtimeRoot);
+  const inventory = JSON.parse(run('mise', ['ls', '--json'], runtimeRoot, env));
   const tools = {} as Record<keyof typeof toolIds, string>;
   const versions = {} as Record<keyof typeof toolIds, string>;
   for (const [name, id] of Object.entries(toolIds) as [keyof typeof toolIds, string][]) {
     const entries = inventory[id]?.filter((entry: any) => entry.active === true);
     if (!Array.isArray(entries) || entries.length !== 1 || !entries[0].installed || !entries[0].active
-      || resolve(entries[0].source?.path ?? '') !== join(policyRoot, 'mise.toml')) {
+      || resolve(entries[0].source?.path ?? '') !== join(runtimeRoot, 'mise.toml')) {
       throw new Error(`${name}: provision the trusted mise lock before validation`);
     }
-    const executable = await realpath(run('mise', ['which', name], policyRoot, env).trim());
+    const executable = await realpath(run('mise', ['which', name], runtimeRoot, env).trim());
     const installation = await realpath(entries[0].install_path);
     const rel = relative(installation, executable);
     if (!rel || rel.startsWith('..') || isAbsolute(rel)) throw new Error(`${name}: executable outside locked installation`);
-    const version = run(executable, ['--version'], policyRoot, env);
+    const version = run(executable, ['--version'], runtimeRoot, env);
     if (!version.split(/\s+/).includes(entries[0].version)) throw new Error(`${name}: installed version differs from mise lock`);
     tools[name] = executable;
     versions[name] = entries[0].version;
@@ -163,12 +166,12 @@ export async function discoverWorkflowFiles(workspace: string, includeTemplates 
   return [...visited].sort();
 }
 
-export async function scanWorkflows(workspace: string, paths: readonly string[]) {
+export async function scanWorkflows(workspace: string, paths: readonly string[], runtimeRoot = policyRoot) {
   const results: WorkflowToolResult[] = [];
   if (!paths.length) return { files: [], versions: {}, results };
   const root = await realpath(workspace);
   const files = await Promise.all(paths.map(path => targetFile(root, path)));
-  const { tools, versions, env } = await resolveWorkflowTools();
+  const { tools, versions, env } = await resolveWorkflowTools(runtimeRoot);
   const temporary = await mkdtemp(join(tmpdir(), 'steward-workflow-scan-'));
   try {
     const isolated: NodeJS.ProcessEnv = { ...env, PATH: [...new Set(Object.values(tools).map(tool => dirname(tool)))].join(delimiter),

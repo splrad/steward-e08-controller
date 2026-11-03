@@ -168,6 +168,8 @@ jobs:
           npm test --prefix tools/quality-language
           npm run verify:runtime --prefix tools/quality-language
       - name: Node tests and configuration
+        env:
+          STEWARD_TEST_TOOLCHAIN_ROOT: ${{ github.workspace }}/policy
         if: needs.scope.outputs.source == 'true' && needs.scope.outputs.mode == 'node'
         working-directory: ${{ github.repository_id == '1440689456' && 'target/candidate' || 'target' }}
         shell: bash
@@ -249,6 +251,8 @@ jobs:
           npm test --prefix tools/quality-language
           npm run verify:runtime --prefix tools/quality-language
       - name: Node tests and configuration
+        env:
+          STEWARD_TEST_TOOLCHAIN_ROOT: ${{ github.workspace }}/policy
         if: needs.scope.outputs.source == 'true' && needs.scope.outputs.mode == 'node'
         working-directory: ${{ github.repository_id == '1440689456' && 'target/candidate' || 'target' }}
         shell: bash
