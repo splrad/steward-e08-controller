@@ -166,7 +166,7 @@
     "packages/runner/test/actions-policies.test.ts": "157345d54dedcf5e4b778ee4c50024a1b639ddf3576df2d3c98dd08e2da3260a",
     "packages/runner/test/artifact-file.test.ts": "641f6cc949b2d3bb01aa3d7bdd4213d717074921f8e25d4cad08706be2efb369",
     "packages/runner/test/artifact-handoff.test.ts": "c5f54962392784b8b3331d35a92b7781c106126bd210862085138dcc7d580a1b",
-    "packages/runner/test/bootstrap-wiring.test.ts": "80a11fab0c43456b04ed65a2c12f8eb0fc742073d1f4531978931df406928c30",
+    "packages/runner/test/bootstrap-wiring.test.ts": "d61d1186682e991c7930dd039f99ca3af98206ae54c34e20edc9a084ec1cb612",
     "packages/runner/test/build-environment.test.ts": "74ff3a177ff1a7a82b99e26a884475343e1e10594b2622a4d6dc2c5e49b4e46f",
     "packages/runner/test/build-manifest.test.ts": "aabf01af217a6837be35b93b81a4b9c036ac54a056d3322a6e3987bb5d2d0e3b",
     "packages/runner/test/channel-artifact.test.ts": "a21a6768a6345007f33a6136a21f175a6900c884d9c55f8ffc84bce5126897b3",
