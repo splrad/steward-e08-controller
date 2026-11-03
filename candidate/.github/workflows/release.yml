@@ -41,6 +41,7 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           npm ci --prefix tools/quality-language --ignore-scripts --no-audit --no-fund
+          uv sync --project tools/template --frozen --only-group release-inspection --no-build
       - name: business-release-coordinator
         shell: bash
         env:

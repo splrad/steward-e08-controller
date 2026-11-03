@@ -39,6 +39,19 @@
       ]
     },
     {
+      "file": "packages/runner/src/native-release-cli.js",
+      "sourceSha256": "adecff1ab13edef7e6f3e5f85f74e77fe24a3d63b0b4b8a0e390010aacf4ec41",
+      "compiledBeforeSha256": "7312b1fc3710455f4b8ed81783e40d84d88a3f5b727e6383f21d153058875ef2",
+      "compiledAfterSha256": "66e597a5ac114aaaf28bd0aa93435a0c9f288f5053dfa539a0734ed113e14974",
+      "replacements": [
+        {
+          "from": "splrad-steward",
+          "to": "splrad-e08-release",
+          "count": 2
+        }
+      ]
+    },
+    {
       "file": "packages/github/src/app-auth.js",
       "sourceSha256": "22c9426e7200e71a388dc4ed28bcb701c920693e70e14123c569bfe0a1fac117",
       "compiledBeforeSha256": "12d2017daddaebd0fecda4ae224be0e8a008f33a942e45be0afef00bfa4bb913",
@@ -100,8 +113,8 @@
     },
     {
       "name": "index.js",
-      "bytes": 2122879,
-      "sha256": "8253ef810601f2ca985caf0a148f7d391c23a0fdfa82ed529c88da6595b756b9"
+      "bytes": 2122887,
+      "sha256": "fb4741c60c96cf7de7fa9432e9d06ff3065145148e6fed2c87fc2b215f9c72ab"
     },
     {
       "name": "package.json",
