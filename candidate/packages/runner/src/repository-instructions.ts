@@ -22,6 +22,8 @@ export async function assertRepositoryInstructions(workspace:string, expected:Bu
   const legacy=transition.legacy??[];
   if(!Array.isArray(legacy)||legacy.some(row=>!row||!Number.isSafeInteger(row.repositoryId)||row.repositoryId<=0||!/^([a-f0-9]{64})$/.test(row.sha256)))
     throw Error('INSTRUCTIONS_TRANSITION_INVALID');
+  const accepted=(bytes:Buffer)=>validFormat(bytes)&&(bytes.equals(expected)||legacy.some(row=>
+    row.repositoryId===transition.repositoryId&&row.sha256===createHash('sha256').update(bytes).digest('hex')));
   // The validated checkout's complete Git index supplies paths; do not follow untracked directory junctions.
   const listing=execFileSync('git',['--no-replace-objects','-c','core.hooksPath=','-c','core.fsmonitor=false','ls-files','-z','--cached'],
     {cwd:workspace,encoding:'buffer',maxBuffer:128*1024*1024,timeout:60000,windowsHide:true});
@@ -39,11 +41,13 @@ export async function assertRepositoryInstructions(workspace:string, expected:Bu
     if(path==='AGENTS.md') {
       if(!present)throw Error('INSTRUCTIONS_BYTES_DIFFER: AGENTS.md');
       const actual=await readFile(current);
-      const acceptedLegacy=legacy.some(row=>row.repositoryId===transition.repositoryId&&row.sha256===createHash('sha256').update(actual).digest('hex'));
-      if(!validFormat(actual)||(!actual.equals(expected)&&!acceptedLegacy))throw Error('INSTRUCTIONS_BYTES_DIFFER: AGENTS.md');
+      if(!accepted(actual))throw Error('INSTRUCTIONS_BYTES_DIFFER: AGENTS.md');
     }else if(present) {
       // The central source is a template artifact, not a second repository review policy.
-      if(transition.templateSource&&path==='templates/repository/AGENTS.md'&&(await readFile(current)).equals(expected))continue;
+      // A prior trusted validator must be able to admit the separately approved
+      // next template. Use only its repository-bound digest transition, never
+      // a registry supplied by the checkout being reviewed.
+      if(transition.templateSource&&path==='templates/repository/AGENTS.md'&&accepted(await readFile(current)))continue;
       throw Error('INSTRUCTIONS_CARRIER_REQUIRES_MIGRATION: '+path);
     }
   }
