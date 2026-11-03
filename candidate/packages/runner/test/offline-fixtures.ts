@@ -91,8 +91,10 @@ export function offlineProcessArguments(command: string, args: string[], options
       return args;
     } catch { return null; }
   }
-  if (!['node', 'pwsh'].includes(executable)) return null;
-  const script = executable === 'node' ? args[0] : args[args.indexOf('-File') + 1];
+  const isolatedPython = executable === 'python' && args[0] === '-I'
+    && (args.length === 3 || args.length === 5 && args[2] === '--source-version');
+  if (!['node', 'pwsh'].includes(executable) && !isolatedPython) return null;
+  const script = isolatedPython ? args[1] : executable === 'node' ? args[0] : args[args.indexOf('-File') + 1];
   if (!script || (executable === 'pwsh' && (!args.includes('-NoProfile') || !args.includes('-File')))) return null;
   const path = resolve(options?.cwd ?? process.cwd(), script);
   if (!local(path) && !state.scripts.has(path)) return null;

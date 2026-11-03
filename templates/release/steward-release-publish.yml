@@ -38,8 +38,8 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: splrad/steward
-          ref: d89aaffa0d0f22e1f8c4d5d160b43da4c7e3262e
+          repository: splrad/steward-e08-controller
+          ref: 2648b843314241cc971d921c00cd51fadf6ab26a
           path: controller
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -59,6 +59,21 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Activate trusted controller tool paths
+        working-directory: controller
+        shell: pwsh
+        env:
+          MISE_SAFE: '1'
+          MISE_LOCKED: '1'
+        run: |
+          $toolPaths = mise bin-paths
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $toolPaths | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Install locked native metadata reader
+        shell: pwsh
+        run: |
+          uv sync --project controller/tools/template --frozen --only-group release-inspection --no-build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Read canonical dispatch and source
         id: identity
         shell: pwsh
@@ -70,7 +85,7 @@ jobs:
           CONTROLLER_SHA: ${{ inputs.controller_sha }}
         run: |
           for ($n = 0; $n -lt 20; $n++) {
-            node controller/packages/runner/dist/index.js release-pipeline identity --cycle-id "$env:CYCLE_ID" --operation-key "$env:OPERATION_KEY" --source-sha "$env:SOURCE_SHA" --controller-sha "$env:CONTROLLER_SHA" --source-dir product --controller-dir controller --state-dir state --output "identity-$n.json"
+            node controller/e08-python/native/index.js release-pipeline identity --cycle-id "$env:CYCLE_ID" --operation-key "$env:OPERATION_KEY" --source-sha "$env:SOURCE_SHA" --controller-sha "$env:CONTROLLER_SHA" --source-dir product --controller-dir controller --state-dir state --output "identity-$n.json"
             if ($LASTEXITCODE -eq 0) { exit 0 }
             if ($LASTEXITCODE -ne 75) { exit $LASTEXITCODE }
             Start-Sleep -Seconds 30
@@ -101,8 +116,8 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: splrad/steward
-          ref: d89aaffa0d0f22e1f8c4d5d160b43da4c7e3262e
+          repository: splrad/steward-e08-controller
+          ref: 2648b843314241cc971d921c00cd51fadf6ab26a
           path: controller
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -140,7 +155,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           UNIT: ${{ matrix.unit }}
-        run: node controller/packages/runner/dist/index.js release-pipeline recover --record record.json --unit "$env:UNIT" --source-dir product --controller-dir controller --state-dir state --directory "$env:RUNNER_TEMP/recovered" --home "$env:RUNNER_TEMP/recover-home" --output recover.json
+        run: node controller/e08-python/native/index.js release-pipeline recover --record record.json --unit "$env:UNIT" --source-dir product --controller-dir controller --state-dir state --directory "$env:RUNNER_TEMP/recovered" --home "$env:RUNNER_TEMP/recover-home" --output recover.json
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         if: steps.unit.outputs.selected == 'true' && steps.recover.outputs.found != 'true'
         with:
@@ -190,7 +205,7 @@ jobs:
             $objects += @{kind='artifact'; id=[long]$env:ARTIFACT_ID; digest=$env:ARTIFACT_DIGEST}
           }
           $json = ConvertTo-Json -InputObject $objects -Compress
-          node controller/packages/runner/dist/index.js release-pipeline result --record record.json --unit "$env:UNIT" --controller-dir controller --state-dir state --job-name "$env:JOB_NAME" --objects "$json" --output result.json
+          node controller/e08-python/native/index.js release-pipeline result --record record.json --unit "$env:UNIT" --controller-dir controller --state-dir state --job-name "$env:JOB_NAME" --objects "$json" --output result.json
   sign:
     needs: [admit, build]
     runs-on: ubuntu-24.04
@@ -209,7 +224,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.admit.outputs.units) }}
-    uses: splrad/steward/.github/workflows/product-release.yml@d89aaffa0d0f22e1f8c4d5d160b43da4c7e3262e
+    uses: splrad/steward-e08-controller/.github/workflows/product-release.yml@2648b843314241cc971d921c00cd51fadf6ab26a
     with:
       record: ${{ needs.admit.outputs.record }}
       unit: ${{ matrix.unit }}
@@ -235,8 +250,8 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: splrad/steward
-          ref: d89aaffa0d0f22e1f8c4d5d160b43da4c7e3262e
+          repository: splrad/steward-e08-controller
+          ref: 2648b843314241cc971d921c00cd51fadf6ab26a
           path: controller
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -268,14 +283,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           UNIT: ${{ matrix.unit }}
-        run: node controller/packages/runner/dist/index.js release-pipeline recover --record record.json --unit "$env:UNIT" --source-dir product --controller-dir controller --state-dir state --directory "$env:RUNNER_TEMP/recovered" --home "$env:RUNNER_TEMP/recover-home" --output recover.json
+        run: node controller/e08-python/native/index.js release-pipeline recover --record record.json --unit "$env:UNIT" --source-dir product --controller-dir controller --state-dir state --directory "$env:RUNNER_TEMP/recovered" --home "$env:RUNNER_TEMP/recover-home" --output recover.json
       - name: Read exact verified artifact ID
         if: steps.recover.outputs.found != 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           UNIT: ${{ matrix.unit }}
-        run: node controller/packages/runner/dist/index.js release-pipeline evidence --record record.json --unit "$env:UNIT" --source-dir product --controller-dir controller --state-dir state --directory "$env:RUNNER_TEMP/final" --home "$env:RUNNER_TEMP/evidence-home" --output evidence.json
+        run: node controller/e08-python/native/index.js release-pipeline evidence --record record.json --unit "$env:UNIT" --source-dir product --controller-dir controller --state-dir state --directory "$env:RUNNER_TEMP/final" --home "$env:RUNNER_TEMP/evidence-home" --output evidence.json
       - name: business-attest
         if: steps.recover.outputs.found != 'true'
         id: attest
@@ -330,7 +345,7 @@ jobs:
             $objects += @{kind='artifact'; id=[long]$env:ARTIFACT_ID; digest=$env:ARTIFACT_DIGEST}
           }
           $json = ConvertTo-Json -InputObject $objects -Compress
-          node controller/packages/runner/dist/index.js release-pipeline result --record record.json --unit "$env:UNIT" --controller-dir controller --state-dir state --job-name "$env:JOB_NAME" --objects "$json" --output result.json
+          node controller/e08-python/native/index.js release-pipeline result --record record.json --unit "$env:UNIT" --controller-dir controller --state-dir state --job-name "$env:JOB_NAME" --objects "$json" --output result.json
 
   complete:
     needs: [admit, build, sign, evidence, freeze]

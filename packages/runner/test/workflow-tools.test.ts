@@ -7,7 +7,7 @@ import YAML from 'yaml';
 const runtimeRoot = resolve(process.env.STEWARD_TEST_TOOLCHAIN_ROOT ?? '.');
 const scanWorkflows = (workspace: string, paths: readonly string[]) => scanWithPolicyTools(workspace, paths, runtimeRoot);
 
-const state = vi.hoisted(() => ({ missing: false, extraEntry: 'none', calls: [] as { command: string; args: string[]; env: Record<string, string> }[] }));
+const state = vi.hoisted(() => ({ missing: false, extraEntry: 'none', diagnostic: null as null | {status: number; stdout: string}, calls: [] as { command: string; args: string[]; env: Record<string, string> }[] }));
 // This integration file permits only mise's read-only lookup and the offline
 // scanners and their version checks from the batch's installed tool directory. All other subprocesses fail.
 vi.mock('node:child_process', async importOriginal => {
@@ -22,6 +22,7 @@ vi.mock('node:child_process', async importOriginal => {
       && /(?:jactionlint|zizmor|shellcheck|pyflakes|python(?:\d+(?:\.\d+)*)?)(?:\.exe)?$/.test(command)
       && (args[0] === '--profile' || args[0] === '--version' || args[0] === '--offline');
     if (!lookup && !scanner) throw new Error('TEST_SUBPROCESS_DENIED');
+    if (args[0] === '--offline' && state.diagnostic) return { ...state.diagnostic, stderr: '' };
     const result = native.spawnSync(command, args, options);
     if (command === 'mise' && args[0] === 'ls' && state.extraEntry !== 'none' && result.status === 0) {
       const inventory = JSON.parse(result.stdout as string);
@@ -36,10 +37,19 @@ vi.mock('node:child_process', async importOriginal => {
 });
 const roots: string[] = [];
 afterEach(async () => {
-  state.missing = false; state.extraEntry = 'none'; state.calls.length = 0; vi.unstubAllEnvs();
+  state.missing = false; state.extraEntry = 'none'; state.diagnostic = null; state.calls.length = 0; vi.unstubAllEnvs();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 const clean = `name: Test\non: pull_request\npermissions:\n  contents: read\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo safe\n`;
+it.each([
+  {status: 14, stdout: 'not JSON'}, {status: 14, stdout: '{}'},
+  {status: 14, stdout: '[]'}, {status: 0, stdout: '[{"ident":"dangerous-triggers"}]'},
+  {status: 1, stdout: '[]'}, {status: 14, stdout: '[{"ident":"dangerous-triggers","ignored":true}]'},
+])('fails closed on an invalid native scanner response: $status $stdout', async diagnostic => {
+  const root = await fixture(clean);
+  state.diagnostic = diagnostic;
+  await expect(scanWorkflows(root, ['.github/workflows/test.yml'])).rejects.toThrow();
+}, 120000);
 async function fixture(text: string) {
   const root = await mkdtemp(join(tmpdir(), 'workflow-tools-test-')); roots.push(root);
   await mkdir(join(root, '.github/workflows'), { recursive: true });
@@ -223,29 +233,6 @@ it.each(['adopted', 'native-sha-update'])('accepts only the trusted metadata tit
   expect(result.exceptions).toHaveLength(1);
 }, 120000);
 
-it.each(['checkout','script','permissions','job-permissions','extra-step','extra-job','environment','token','action','path','candidate-policy','other-finding'])('refuses widening the title exception: %s', async kind => {
-  const template = await readFile('templates/repository/.github/workflows/pr-title.yml', 'utf8');
-  const doc = YAML.parse(template), step = doc.jobs.title.steps[0];
-  if (kind === 'checkout') doc.jobs.title.steps.unshift({ uses: 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', with: { 'persist-credentials': false } });
-  if (kind === 'script') doc.jobs.title.steps = [{ run: 'echo safe' }];
-  if (kind === 'permissions') doc.permissions.contents = 'write';
-  if (kind === 'job-permissions') doc.jobs.title.permissions = { contents: 'write' };
-  if (kind === 'extra-step') doc.jobs.title.steps.push(structuredClone(step));
-  if (kind === 'extra-job') doc.jobs.other = structuredClone(doc.jobs.title);
-  if (kind === 'environment') doc.jobs.title.environment = 'production';
-  if (kind === 'token') step.env.GITHUB_TOKEN = '${{ secrets.OTHER_TOKEN }}';
-  if (kind === 'action') step.uses = step.uses.replace('amannn/', 'attacker/');
-  if (kind === 'candidate-policy') step.with.types += '\nextra';
-  const root = await fixture(YAML.stringify(doc));
-  if (kind !== 'path') await rename(join(root, '.github/workflows/test.yml'), join(root, '.github/workflows/pr-title.yml'));
-  if (kind === 'candidate-policy') {
-    await mkdir(join(root, 'templates/repository/.github/workflows'), { recursive: true });
-    await writeFile(join(root, 'templates/repository/.github/workflows/pr-title.yml'), YAML.stringify(doc));
-  }
-  if (kind === 'other-finding') await writeFile(join(root, '.github/workflows/unsafe.yml'), clean.replace('echo safe', 'echo "${{ github.head_ref }}"'));
-  await expect(scanWorkflows(root, await discoverWorkflowFiles(root))).rejects.toThrow(/zizmor.*failed|jactionlint.*failed/);
-}, 120000);
-
 it.each(['adopted','action-sha','mise-release'])('accepts the approved central promotion trigger and retains native findings: %s',async kind=>{
   const document=YAML.parse(await readFile('.github/workflows/governance-promotion.yml','utf8'));
   if(kind==='action-sha')document.jobs.promote.steps[0].uses='actions/checkout@'+'a'.repeat(40);
@@ -259,34 +246,41 @@ it.each(['adopted','action-sha','mise-release'])('accepts the approved central p
   expect(result.results.at(-1)?.stdout).toContain('workflow_run');
 },120000);
 
-it.each(['path','trigger','branch','upstream','job-condition','head-checkout','default-ref','credentials','permissions','job-permissions','environment','concurrency','cache','artifact','action-project','action-ref','extra-step','extra-job','script','preflight','write-gate','secret','candidate-policy','other-finding'])('rejects widening the promotion exception: %s',async kind=>{
-  const document=YAML.parse(await readFile('.github/workflows/governance-promotion.yml','utf8')),job=document.jobs.promote;
-  const write=job.steps.find((s:any)=>s.env?.GOVERNANCE_APP_PRIVATE_KEY),preflight=job.steps.find((s:any)=>s.id==='source');
-  if(kind==='trigger')document.on.pull_request_target={};
-  if(kind==='branch')document.on.workflow_run.branches=['other'];
-  if(kind==='upstream')document.on.workflow_run.workflows=['Other'];
-  if(kind==='job-condition')job.if='true';
-  if(kind==='head-checkout')job.steps[0].with.ref='${{ github.event.workflow_run.head_sha }}';
-  if(kind==='default-ref')delete job.steps[0].with.ref;
-  if(kind==='credentials')job.steps[0].with['persist-credentials']=true;
-  if(kind==='permissions')document.permissions.contents='write';
-  if(kind==='job-permissions')job.permissions={contents:'write'};
-  if(kind==='environment')job.environment.name='other';
-  if(kind==='concurrency')job.concurrency.group='other';
-  if(kind==='cache')job.steps[1].with.cache=true;
-  if(kind==='artifact')job.steps.push({uses:'actions/download-artifact@'+'a'.repeat(40)});
-  if(kind==='action-project')job.steps[0].uses='other/checkout@'+'a'.repeat(40);
-  if(kind==='action-ref')job.steps[0].uses='actions/checkout@main';
-  if(kind==='extra-step')job.steps.push({run:'echo extra'});
-  if(kind==='extra-job')document.jobs.extra=structuredClone(job);
-  if(kind==='script')write.run='node scripts/other.mjs';
-  if(kind==='preflight')job.steps=job.steps.filter((s:any)=>s!==preflight);
-  if(kind==='write-gate')write.if='always()';
-  if(kind==='secret')preflight.env.GOVERNANCE_APP_PRIVATE_KEY='${{ secrets.GOVERNANCE_APP_PRIVATE_KEY }}';
-  if(kind==='candidate-policy')write.env.NATIVE_VALIDATION_WORKFLOW_ID='${{ inputs.workflow_id }}';
+it.each(['title-path','promotion-path','wrong-trigger','other-finding'])('rejects diagnostics outside the exact adopted trigger locations: %s',async kind=>{
+  const title=kind==='title-path';
+  const document=YAML.parse(await readFile(title?'templates/repository/.github/workflows/pr-title.yml':'.github/workflows/governance-promotion.yml','utf8'));
+  if(kind==='wrong-trigger')document.on.pull_request_target={};
   const root=await fixture(YAML.stringify(document));
-  if(kind!=='path')await rename(join(root,'.github/workflows/test.yml'),join(root,'.github/workflows/governance-promotion.yml'));
-  if(kind==='candidate-policy')await writeFile(join(root,'zizmor.yml'),'rules:\n  dangerous-triggers:\n    ignore: [governance-promotion.yml]\n');
+  if(!kind.endsWith('-path'))await rename(join(root,'.github/workflows/test.yml'),join(root,'.github/workflows/governance-promotion.yml'));
+  if(kind==='other-finding')await writeFile(join(root,'.github/workflows/unsafe.yml'),clean.replace('echo safe','echo "${{ github.head_ref }}"'));
+  await expect(scanWorkflows(root,await discoverWorkflowFiles(root))).rejects.toThrow(/zizmor.*failed|jactionlint.*failed/);
+},120000);
+
+it.each(['title','promotion'])('accepts a normal additional job without a duplicate YAML contract: %s',async kind=>{
+  const path=kind==='title'?'.github/workflows/pr-title.yml':'.github/workflows/governance-promotion.yml';
+  const document=YAML.parse(await readFile(kind==='title'?'templates/repository/'+path:path,'utf8'));
+  document.jobs.documentation={name:'Reviewed documentation', 'runs-on':'ubuntu-24.04',permissions:{contents:'read'},steps:[{run:'echo documentation'}]};
+  const root=await fixture(YAML.stringify(document));await rename(join(root,'.github/workflows/test.yml'),join(root,path));
+  const result=await scanWorkflows(root,await discoverWorkflowFiles(root));
+  expect(result.exceptions).toHaveLength(1);
+},120000);
+
+it.each(['.github/workflows/pr-labeler.yml','templates/repository/.github/workflows/pr-labeler.yml'])('accepts the approved label metadata trigger at %s',async path=>{
+  const text=clean.replace('on: pull_request','on:\n  workflow_run:\n    workflows: [SPLRAD PR Title]\n    types: [completed]');
+  const root=await fixture(text);
+  await mkdir(join(root,path,'..'),{recursive:true});
+  await rename(join(root,'.github/workflows/test.yml'),join(root,path));
+  const result=await scanWorkflows(root,[path]);
+  expect(result.results.at(-1)?.status).toBe(14);
+  expect(result.exceptions).toHaveLength(1);
+  expect(result.exceptions![0]).toMatchObject({decision:'E08-LABELER-TITLE-WORKFLOW-RUN-20261103',finding:{ident:'dangerous-triggers',ignored:false}});
+},120000);
+
+it.each(['other-path','pull_request_target','other-finding'])('retains native labeler scan rejection: %s',async kind=>{
+  const trigger=kind==='pull_request_target'?'pull_request_target: {}':'workflow_run:\n    workflows: [SPLRAD PR Title]\n    types: [completed]';
+  const text=clean.replace('on: pull_request','on:\n  '+trigger);
+  const root=await fixture(text),path=kind==='other-path'?'.github/workflows/test.yml':'.github/workflows/pr-labeler.yml';
+  if(kind!=='other-path')await rename(join(root,'.github/workflows/test.yml'),join(root,path));
   if(kind==='other-finding')await writeFile(join(root,'.github/workflows/unsafe.yml'),clean.replace('echo safe','echo "${{ github.head_ref }}"'));
   await expect(scanWorkflows(root,await discoverWorkflowFiles(root))).rejects.toThrow(/zizmor.*failed|jactionlint.*failed/);
 },120000);

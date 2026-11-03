@@ -7,13 +7,13 @@ import { selectReleaseProducers, producerArtifactName } from './release-run.js';
 import { jobFact } from './native-release-evidence.js';
 import { originalJobExecutions, type NativeJobAttempt } from '../../core/src/native-job-origins.js';
 import { verifySealedArtifacts, validateReleaseManifest, fileDigest, type ReleaseManifest } from './release-artifacts.js';
-import { nativeReleaseInspector } from './release-native.js';
+import { nativeReleaseInspector, nativePythonSourceVersion } from './release-native.js';
 import { committedVersionNotes } from '../../core/src/release-template.js';
 import { downloadNativeArtifact } from './native-artifact-download.js';
 import { Octokit } from '@octokit/rest';
 import { assertPipelineSource, type PipelineSource, type PublishPipelineRecord } from './release-pipeline-record.js';
 import { parsePipelineRecord, pipelineSource, type BuildPipelineRecord } from './release-pipeline-record.js';
-import { parseDeliveryConfig, deliveryAssetNames, assertDeliveryPath, type DeliveryUnit } from '../../core/src/delivery-config.js';
+import { parseDeliveryConfig, deliveryAssetNames, assertDeliveryPath, type DeliveryUnit, type DeliveryConfig } from '../../core/src/delivery-config.js';
 import { parseReleaseDescriptor,artifactNames } from '../../core/src/release-descriptor.js';
 import { parseLegacyRepositoryCatalog } from '../../core/src/legacy-repository-policy.js';
 import { decodeNormalizedDelivery,type NormalizedDeliveryEvidence } from '../../core/src/native-evidence.js';
@@ -212,6 +212,37 @@ export function mergedBuildCycle(input: { prNumber: number; sourceSha: string; c
     requiredChannels: delivery.units.filter(unit => input.units.some(value => value.id === unit.id)).flatMap(unit => unit.channels.filter(channel => channel.required).map(channel => ({ unitId: unit.id, channelId: channel.id }))),
     dispatches: [], publications: [], channelFacts: [], executionEvidence: [], completionObservations: [], completedEvidencePath: null, repairOf: null, approvedRepairDecision: null });
 }
+/** The build admission and central freeze recovery derive the same native versions and source locks from S. */
+async function nativeDeliveryProjection(delivery:DeliveryConfig,targets:CycleRecord['units'],source:(path:string)=>Promise<Buffer>,controllerDirectory:string) {
+  const settings=JSON.parse((await source('release-please-config.json')).toString('utf8'));
+  const manifest=JSON.parse((await source('.release-please-manifest.json')).toString('utf8'));
+  if(JSON.stringify(Object.keys(settings.packages??{}).sort())!==JSON.stringify(delivery.units.map(unit=>unit.path).sort())
+    ||JSON.stringify(Object.keys(manifest).sort())!==JSON.stringify(delivery.units.map(unit=>unit.path).sort()))fail('Release Please delivery paths');
+  const versions=new Map<string,string>(),toolLocks:Record<string,string>={};
+  for(const target of targets) {
+    const unit=delivery.units.find(unit=>unit.id===target.id);
+    if(!unit||versions.has(unit.id)||manifest[unit.path]!==target.version)fail('native version source');
+    const options={...settings,...settings.packages[unit.path]},component=options['include-component-in-tag']===false?undefined:options.component;
+    if(options['include-component-in-tag']!==false&&!component)fail('native tag component');
+    if(new TagName(Version.parse(target.version),component,options['tag-separator'],options['include-v-in-tag']).toString()!==target.tag)fail('native tag source');
+    const path=(name:string)=>{assertDeliveryPath(name);return unit.path==='.'?name:`${unit.path}/${name}`;};
+    let packageVersion=target.version,lock:string;
+    if(options['release-type']==='simple') {
+      if((await source(path(options['version-file']))).toString('utf8').trim()!==target.version)fail('native version projection');
+      lock='global.json';
+    } else if(options['release-type']==='node') {
+      packageVersion=JSON.parse((await source(path('package.json'))).toString('utf8')).version;
+      if(packageVersion!==target.version)fail('native version projection');
+      lock=path('package-lock.json');
+    } else if(options['release-type']==='python') {
+      packageVersion=await nativePythonSourceVersion(controllerDirectory,await source(path('pyproject.toml')),target.version);
+      lock=path('requirements-build.txt');
+    } else fail('native package version evidence required');
+    const bytes=await source(lock);if(!bytes.length)fail('empty source lock');toolLocks[`source/${lock}`]=hash(bytes);
+    versions.set(unit.id,packageVersion);
+  }
+  return {versions,toolLocks};
+}
 /** Read-only admission: no release/tag lookup, controller catalog, state write or future attempt allocation. */
 export async function pipelineIdentity(input: ProductBuildInput, environment: NodeJS.ProcessEnv = process.env,
   gh: GhCommand = nativeGhCommand, io: EvidenceTransport = nativeEvidenceTransport(process.env.GH_TOKEN)) {
@@ -257,10 +288,7 @@ export async function pipelineIdentity(input: ProductBuildInput, environment: No
   const workflow = document.toJS({ maxAliasCount: 0 }), matrix = workflow?.jobs?.build?.strategy?.matrix?.include;
   if (!Array.isArray(matrix) || !matrix.length || matrix.some(row => !row || Object.keys(row).sort().join(',') !== 'assets,target,unit'
     || !/^[a-z][a-z0-9-]*$/.test(row.target) || !Array.isArray(row.assets) || !row.assets.length)) fail('native producer matrix');
-  const settings = JSON.parse((await source('release-please-config.json')).toString('utf8'));
-  const manifest = JSON.parse((await source('.release-please-manifest.json')).toString('utf8'));
-  if (JSON.stringify(Object.keys(settings.packages ?? {}).sort()) !== JSON.stringify(delivery.units.map(unit => unit.path).sort())
-    || JSON.stringify(Object.keys(manifest).sort()) !== JSON.stringify(delivery.units.map(unit => unit.path).sort())) fail('Release Please delivery paths');
+  const projection=await nativeDeliveryProjection(delivery,cycle.units,source,input.controllerDirectory);
   const candidate = repository.candidate;
   if (!candidate || candidate.prNumber !== cycle.prNumber) fail('candidate identity archive');
   const chunks = input.state.domainRecords.filter(item => new RegExp(`^generated/${candidate.id}/session(?:-[1-9][0-9]*)?\\.json$`).test(item.path))
@@ -274,19 +302,8 @@ export async function pipelineIdentity(input: ProductBuildInput, environment: No
   const units: BuildPipelineRecord['units'] = [];
   for (const target of cycle.units) {
     const unit = delivery.units.find(unit => unit.id === target.id), frozen = session.generated.units.find((unit: any) => unit.id === target.id);
-    if (!unit || !frozen || frozen.version !== target.version || frozen.tag !== target.tag || manifest[unit.path] !== target.version) fail('native version source');
-    const options = { ...settings, ...settings.packages[unit.path] }, component = options['include-component-in-tag'] === false ? undefined : options.component;
-    if (options['include-component-in-tag'] !== false && !component) fail('native tag component');
-    if (new TagName(Version.parse(target.version), component, options['tag-separator'], options['include-v-in-tag']).toString() !== target.tag) fail('native tag source');
-    // Product native metadata is checked again against the produced package by the existing native inspector.
-    let packageVersion = target.version;
-    if (options['release-type'] === 'simple') {
-      const path = options['version-file']; assertDeliveryPath(path);
-      if ((await source(unit.path === '.' ? path : `${unit.path}/${path}`)).toString('utf8').trim() !== target.version) fail('native version projection');
-    } else if (options['release-type'] === 'node') {
-      const metadata = JSON.parse((await source(unit.path === '.' ? 'package.json' : `${unit.path}/package.json`)).toString('utf8'));
-      packageVersion = metadata.version; if (packageVersion !== target.version) fail('native version projection');
-    } else fail('native package version evidence required');
+    if (!unit || !frozen || frozen.version !== target.version || frozen.tag !== target.tag) fail('native version source');
+    const packageVersion=projection.versions.get(unit.id)!;
     const rows = matrix.filter(row => row.unit === unit.id);
     const builds = rows.map(row => ({ id: row.target as string, jobName: `build/${row.target}/${unit.id}`, expectedArtifacts: row.assets as string[] }));
     const assets = [...deliveryAssetNames(unit, target.version, packageVersion)].map(([id, name]) => {
@@ -299,9 +316,7 @@ export async function pipelineIdentity(input: ProductBuildInput, environment: No
     units.push({ id: unit.id, version: target.version, packageVersion, tag: target.tag, builds, assets, contributors: selected.contributors });
   }
   if (matrix.some(row => !delivery.units.some(unit => unit.id === row.unit))) fail('unknown matrix unit');
-  const toolLocks: Record<string, string> = {};
-  for (const [directory, sha, path, key] of [[input.controllerDirectory, cycle.controllerSha, 'mise.lock', 'controller/mise.lock'],
-    [input.sourceDirectory, cycle.sourceSha, 'global.json', 'source/global.json']] as const) toolLocks[key] = hash(await file(directory, sha, path));
+  const toolLocks:Record<string,string>={'controller/mise.lock':hash(await file(input.controllerDirectory,cycle.controllerSha,'mise.lock')),...projection.toolLocks};
   const evidence = await inspectNativeCycle(context, input.state.domainRecords.filter(item => item.path.startsWith('evidence/native/')), io, new Date().toISOString(),
     { complete: true, observations: input.state.domainRecords.filter(item => item.path.startsWith('evidence/reads/')).map(item => item.value),
       sourceRejections:input.state.domainRecords.filter(item=>item.path.startsWith('evidence/source-rejection/')),retryLimits: input.state.domainRecords.filter(item => item.path.startsWith('evidence/retry-limit/')) });
@@ -518,8 +533,8 @@ export async function pipelinePreparePublication(context: EvidenceContext, root:
   const document = parseDocument(workflow.bytes.toString('utf8'), { uniqueKeys: true }); if (document.errors.length) fail('source workflow');
   const matrix = document.toJS({ maxAliasCount: 0 })?.jobs?.build?.strategy?.matrix?.include;
   if (!Array.isArray(matrix) || !matrix.length) fail('native producer matrix');
-  const toolLocks = { 'controller/mise.lock': hash((await source('splrad/steward', cycle.controllerSha, 'mise.lock')).bytes),
-    'source/global.json': hash((await source(context.repository, cycle.sourceSha, 'global.json')).bytes) };
+  const projection=await nativeDeliveryProjection(delivery,cycle.units,async path=>(await source(context.repository,cycle.sourceSha,path)).bytes,controllerDirectory);
+  const toolLocks = { 'controller/mise.lock': hash((await source('splrad/steward', cycle.controllerSha, 'mise.lock')).bytes),...projection.toolLocks };
   const records: { build: BuildPipelineRecord; unitId: string; directory: string; manifest: ProductReleaseManifest }[] = [];
   const pages: NativePages = async (path, field) => {
     const prefix = `repos/${context.repository}/`; if (!path.startsWith(prefix)) fail('native page target');
@@ -527,8 +542,9 @@ export async function pipelinePreparePublication(context: EvidenceContext, root:
   };
   for (const unit of cycle.units) {
     const declared = delivery.units.find(value => value.id === unit.id); if (!declared) return fail('publication unit');
+    const packageVersion=projection.versions.get(unit.id)!;
     const builds = matrix.filter(row => row.unit === unit.id).map(row => ({ id: row.target, jobName: `build/${row.target}/${unit.id}`, expectedArtifacts: row.assets }));
-    const assets = [...deliveryAssetNames(declared, unit.version, unit.version)].map(([id, name]) => {
+    const assets = [...deliveryAssetNames(declared, unit.version, packageVersion)].map(([id, name]) => {
       const producer = builds.filter(build => build.expectedArtifacts?.includes(id)); if (producer.length !== 1) fail('asset producer');
       return { id, name, build: producer[0]!.id };
     });
@@ -548,7 +564,7 @@ export async function pipelinePreparePublication(context: EvidenceContext, root:
         if (run.status !== 'completed' || run.conclusion !== 'success') fail('completed product Run required');
         const pipeline: PipelineSource = { repositoryId: context.repositoryId, fullName: context.repository, sourceSha: cycle.sourceSha,
           controllerSha: cycle.controllerSha, runId: run.id, attempt: run.runAttempt, ref: `refs/heads/${request.ref}`, event: run.event, toolLocks,
-          inspectJob: `freeze/${unit.id}`, unit: { id: unit.id, version: unit.version, packageVersion: unit.version, tag: unit.tag,
+          inspectJob: `freeze/${unit.id}`, unit: { id: unit.id, version: unit.version, packageVersion, tag: unit.tag,
             deliverySha256: hash(deliverySource.bytes), templateSha256: hash(template.bytes), builds, assets } };
         const frozen = await findFrozenFinal(pipeline, pages); if (frozen) candidates.push({ source: pipeline, ...frozen });
       }
@@ -566,7 +582,7 @@ export async function pipelinePreparePublication(context: EvidenceContext, root:
     const build = parsePipelineRecord({ schemaVersion: 1, kind: 'build', repositoryId: context.repositoryId, fullName: context.repository,
       cycleId: cycle.id, requestKey: request.requestKey, sourceSha: cycle.sourceSha, controllerSha: cycle.controllerSha, buildRef: `refs/heads/${request.ref}`,
       runId: m.runId, runAttempt: m.attempt, toolLocks, delivery, deliverySha256: hash(deliverySource.bytes), templateSha256: hash(template.bytes),
-      units: [{ id: unit.id, version: unit.version, packageVersion: unit.version, tag: unit.tag, builds, assets, contributors: [] }] }) as BuildPipelineRecord;
+      units: [{ id: unit.id, version: unit.version, packageVersion, tag: unit.tag, builds, assets, contributors: [] }] }) as BuildPipelineRecord;
     await pipelineFrozenManifest(build, unit.id, directory);
     if (unit.manifestDigest !== null && unit.manifestDigest !== (await fileDigest(directory, 'artifact-manifest.json')).sha256) fail('frozen manifest changed');
     records.push({ build, unitId: unit.id, directory, manifest: m });

@@ -450,8 +450,16 @@ dependencies = [
     { name = "copier" },
 ]
 
+[package.dev-dependencies]
+release-inspection = [
+    { name = "packaging" },
+]
+
 [package.metadata]
 requires-dist = [{ name = "copier", specifier = "==9.19.1" }]
+
+[package.metadata.requires-dev]
+release-inspection = [{ name = "packaging", specifier = "==26.3" }]
 
 [[package]]
 name = "typing-extensions"

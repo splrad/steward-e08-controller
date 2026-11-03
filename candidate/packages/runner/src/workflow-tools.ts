@@ -42,7 +42,7 @@ function run(executable: string, args: string[], cwd: string, env: NodeJS.Proces
   return result.stdout;
 }
 
-/** Select only the two adopted native trigger diagnostics; workflow behavior stays under normal review. */
+/** Select only the three adopted native trigger diagnostics; workflow behavior stays under normal review. */
 function acceptedTrigger(root: string, finding: any, files: readonly string[]): string | null {
   if (finding?.ident !== 'dangerous-triggers' || finding.ignored !== false || !Array.isArray(finding.locations)) return null;
   const primary = finding.locations.filter((location: any) => location?.symbolic?.kind === 'Primary');
@@ -55,6 +55,8 @@ function acceptedTrigger(root: string, finding: any, files: readonly string[]): 
     && route === JSON.stringify([{ Key: 'on' }, { Key: 'pull_request_target' }])) return 'E07-TITLE-METADATA-20261028';
   if (local === '.github/workflows/governance-promotion.yml'
     && route === JSON.stringify([{ Key: 'on' }, { Key: 'workflow_run' }])) return 'E07-PROMOTION-WORKFLOW-RUN-20261031';
+  if (['.github/workflows/pr-labeler.yml', 'templates/repository/.github/workflows/pr-labeler.yml'].includes(local)
+    && route === JSON.stringify([{ Key: 'on' }, { Key: 'workflow_run' }])) return 'E08-LABELER-TITLE-WORKFLOW-RUN-20261103';
   return null;
 }
 export async function resolvePolicyTool(name: 'syft' | 'gh' | 'lychee' | 'oras' | 'uv', runtimeRoot = policyRoot): Promise<string> {
