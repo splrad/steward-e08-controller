@@ -65,6 +65,9 @@ if source.suffix == ".whl":
         if mode == "entry-limit":
             for index in range(4097): after.writestr(f"extra/{index}.py", "")
         if mode == "no-execution": after.writestr("untrusted.py", "raise RuntimeError('must not run')")
+        if mode == "windows-normalization":
+            after.writestr("pkg/a?.py", "first byte stream")
+            after.writestr("pkg/a_.py", "different byte stream")
     if mode == "expanded-limit":
         data=bytearray(output.read_bytes());index=data.index(b"PK\x01\x02")
         struct.pack_into("<I",data,index+24,256*1024*1024+1);output.write_bytes(data)
@@ -87,3 +90,6 @@ else:
             value=b"raise RuntimeError('must not run')"
             if mode=="symlink":info.type=tarfile.SYMTYPE;info.linkname="../../outside.py";value=b""
             info.size=len(value);after.addfile(info,io.BytesIO(value))
+        if mode == "windows-normalization":
+            for name, value in [("pkg/a?.py", b"first byte stream"), ("pkg/a_.py", b"different byte stream")]:
+                info=tarfile.TarInfo(root+"/"+name);info.size=len(value);after.addfile(info,io.BytesIO(value))

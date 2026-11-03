@@ -73,6 +73,14 @@ it.each(['1.2.3','1.2.4rc1'])('stages actual %s wheel/sdist bytes without execut
     await expect(promisify(execFile)(python,['-I',helper,'--stage',output,staged],{env:isolatedBuildEnvironment(process.env,f.root),cwd:f.root,timeout:30000,windowsHide:true})).rejects.toMatchObject({code:2});
   }
 },30000);
+it.each(['whl','tar.gz'])('rejects Windows-normalized %s collisions before creating staging',async kind=>{
+  const f=await fixture(),asset=f.selected.find(a=>a.file.endsWith('.'+kind))!,output=join(f.out,asset.file),config=join(f.root,'mutation.json'),staged=join(f.root,'sbom-staging');
+  await writeFile(config,JSON.stringify({source:join(fixtures,asset.file),output,mode:'windows-normalization'}));
+  await promisify(execFile)(python,['-I',mutation,config],{env:isolatedBuildEnvironment(process.env,f.root),cwd:f.root,timeout:30000,windowsHide:true});
+  expect(await f.inspector.inspectPath!(output)).toBe('1.2.3');
+  await expect(promisify(execFile)(python,['-I',helper,'--stage',output,staged],{env:isolatedBuildEnvironment(process.env,f.root),cwd:f.root,timeout:30000,windowsHide:true})).rejects.toMatchObject({code:2});
+  await expect(access(staged)).rejects.toMatchObject({code:'ENOENT'});
+},30000);
 it.each(['whl','tar.gz'])('normalizes official name/version metadata in %s without importing its code',async kind=>{
   const f=await fixture('1.2.4rc1'),asset=f.selected.find(a=>a.file.endsWith('.'+kind))!,output=join(f.out,asset.file),config=join(f.root,'mutation.json');
   await writeFile(config,JSON.stringify({source:join(fixtures,asset.file),output,mode:'normalized'}));

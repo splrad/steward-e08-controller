@@ -171,6 +171,7 @@ def stage(path, destination):
     def portable(names):
         for name in names:
             for part in name.rstrip('/').split('/'):
+                require(not re.search(r'[<>"|?*]', part))
                 require(not part.endswith(('.', ' ')))
                 require(not re.match(r'^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?:\.|$)', part, re.I))
     if path.name.endswith('.whl'):
