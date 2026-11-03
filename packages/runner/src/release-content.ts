@@ -101,7 +101,7 @@ export async function collectContentInput(options: { directory: string; candidat
 }
 async function groupPayloads(work: ContentWork, stage: ContentStage, sources: ContentSource[], items: ContentItem[], background: ContentItem[] = [], composeUnit?: string) {
   const values = stage === 'COMPOSE' ? items : sources;
-  let payload: ContentPayload = { stage, unitIds: [], units: work.input.units, sources: [], items: [], background };
+  let payload: ContentPayload = { stage, unitIds: [], units: work.input.units, sources: [], items: [], background: [...background] };
   const add = async () => {
     if (!ids(payload).length) return;
     const batch = await batchFor(work.input, payload); work.input.batches.push(batch); work.payloads[batch.id] = payload;
@@ -112,7 +112,7 @@ async function groupPayloads(work: ContentWork, stage: ContentStage, sources: Co
     next.unitIds = stage === 'COMPOSE' ? [...payload.unitIds] : [...new Set(next.sources.map(s => s.unitId))].sort();
     if (stage === 'COMPOSE') next.unitIds = [composeUnit!];
     if (utf8Length(contentWireInput(next)) > 24 * 1024 || stage !== 'COMPOSE' && payload.sources.length > 0 && payload.sources[0]!.unitId !== (value as ContentSource).unitId) {
-      await add(); payload = { stage, unitIds: stage === 'COMPOSE' ? [composeUnit!] : [(value as ContentSource).unitId], units: work.input.units, sources: stage === 'COMPOSE' ? [] : [value as ContentSource], items: stage === 'COMPOSE' ? [value as ContentItem] : [], background };
+      await add(); payload = { stage, unitIds: stage === 'COMPOSE' ? [composeUnit!] : [(value as ContentSource).unitId], units: work.input.units, sources: stage === 'COMPOSE' ? [] : [value as ContentSource], items: stage === 'COMPOSE' ? [value as ContentItem] : [], background: [...background] };
       if (utf8Length(contentWireInput(payload)) > 24 * 1024) throw new Error('CONTENT_SINGLE_SOURCE_LIMIT');
     } else payload = next;
   }
@@ -189,7 +189,7 @@ export async function resumeContentBatches(work: ContentWork, cache: ContentCach
       const values = payload.stage === 'COMPOSE' ? payload.items : payload.sources;
       if (values.length < 2) throw new Error('CONTENT_SPLIT_INVALID');
       for (const slice of [values.slice(0, Math.ceil(values.length / 2)), values.slice(Math.ceil(values.length / 2))]) {
-        const childPayload = { ...payload, sources: payload.stage === 'COMPOSE' ? [] : slice as ContentSource[], items: payload.stage === 'COMPOSE' ? slice as ContentItem[] : [] };
+        const childPayload = { ...payload, background: [...payload.background], sources: payload.stage === 'COMPOSE' ? [] : slice as ContentSource[], items: payload.stage === 'COMPOSE' ? slice as ContentItem[] : [] };
         const child = await batchFor(work.input, childPayload, batch.id); work.input.batches.push(child); work.payloads[child.id] = childPayload; batch.childIds.push(child.id);
       }
       batch.status = 'SUPERSEDED'; entry.split = true;

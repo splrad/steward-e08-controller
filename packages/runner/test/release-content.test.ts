@@ -125,3 +125,44 @@ it('propagates shared roots and workspace dependencies while composing each unit
   expect(r.requests.map(text=>JSON.parse(text)).every(p=>p.unitIds.length===1)).toBe(true);
   expect(work.input.batches.filter(b=>b.stage==='COMPOSE').map(b=>b.unitIds)).toEqual([['app'],['lib']]);
 });
+
+it('keeps every persisted batch digest valid while enriching other DIFF batches', async () => {
+  const work = await planContentBatches(input(), [source(0, 'CONTEXT'),
+    ...[1, 2, 3].map(n => ({ ...source(n), text: 'x'.repeat(16000) }))]);
+  expect(work.input.batches.filter(b => b.stage === 'DIFF')).toHaveLength(3);
+  const r = runtime(), save = r.port.save;
+  r.port.save = async (current, cache) => {
+    for (const batch of current.input.batches) {
+      expect(digest(JSON.stringify(current.payloads[batch.id]))).toBe(batch.inputDigest);
+    }
+    await save(current, cache);
+  };
+  expect((await resumeContentBatches(work, {}, r.port)).status).toBe('READY');
+});
+
+it('fits background independently for a nearly full DIFF and resumes its serialized ledger', async () => {
+  const full = source(2), initial = await planContentBatches(input(), [full]);
+  const overhead = Buffer.byteLength(contentWireInput(Object.values(initial.payloads)[0]!));
+  full.text = 'x'.repeat(24 * 1024 - overhead + Buffer.byteLength(full.text) - 8);
+  const work = await planContentBatches(input(), [source(0, 'CONTEXT'), source(1), full]);
+  expect(work.input.batches.filter(b => b.stage === 'DIFF')).toHaveLength(2);
+  const r = runtime(), normal = r.port.call, cache: ContentCache = {};
+  r.port.call = async text => {
+    if (Buffer.byteLength(text) > 24 * 1024) throw new Error('CONTENT_INPUT_LIMIT');
+    const result = await normal(text);
+    if (JSON.parse(text).stage === 'DIFF') r.edit();
+    return result;
+  };
+  expect((await resumeContentBatches(work, cache, r.port)).status).toBe('EDITING');
+  const restored: ContentWork = JSON.parse(JSON.stringify(work));
+  const next = runtime(), call = next.port.call;
+  next.port.call = async text => {
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(24 * 1024);
+    return call(text);
+  };
+  expect(await resumeContentBatches(restored, JSON.parse(JSON.stringify(cache)), next.port)).toEqual({ status: 'READY', calls: 2 });
+  const pendingRequest = JSON.parse(next.requests[0]!);
+  expect(pendingRequest.sources.map((s: ContentSource) => s.id)).toEqual([full.id]);
+  expect(pendingRequest.background).toEqual([]);
+  expect(restored.input.batches.every(b => b.status === 'READY')).toBe(true);
+});
