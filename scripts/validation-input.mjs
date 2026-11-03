@@ -11,6 +11,14 @@ export async function regular(workspace,path) {
   const root=await realpath(workspace),file=join(root,path),actual=await realpath(file),info=await lstat(file);
   check(actual.startsWith(root+sep)&&info.isFile()&&!info.isSymbolicLink(),'FILE_BOUNDARY');return file;
 }
+export function buildMode(files) {
+  const modes=[['node',files.includes('package.json')],['dotnet',files.includes('CADFontAutoReplace.slnx')&&files.includes('global.json')],['python',files.includes('pyproject.toml')]].filter(([,selected])=>selected);
+  check(modes.length<=1,'AMBIGUOUS_BUILD');
+  const mode=modes[0]?.[0]??'none';
+  check(mode!=='python'||files.includes('requirements-build.txt'),'PYTHON_BUILD_LOCK_MISSING');
+  check(mode!=='none'||!files.some(p=>/\.(?:[cm]?[jt]sx?|cs|py|go|rs|java|cpp|c)$/.test(p)),'UNSUPPORTED_BUILD');
+  return mode;
+}
 export async function validationInput(workspace,env=process.env) {
   const event=JSON.parse(await readFile(env.GITHUB_EVENT_PATH,'utf8'));
   check(env.WORKFLOW_REPOSITORY==='splrad/steward-e08-controller'&&env.WORKFLOW_PATH==='.github/workflows/pr-validation-native.yml'
@@ -33,10 +41,8 @@ export async function validationInput(workspace,env=process.env) {
   const changedPaths=new TextDecoder('utf-8',{fatal:true}).decode(git(workspace,['diff','--no-ext-diff','--no-textconv','--name-only','--no-renames','-z',base,head])).split('\0').filter(Boolean);
   const input={complete:true,repositoryId,base,head,workflowSha:env.WORKFLOW_SHA,changedPaths};
   const files=git(workspace,['ls-files','-z']).toString('utf8').split('\0').filter(Boolean);
-  const node=files.includes('package.json'),dotnet=files.includes('CADFontAutoReplace.slnx')&&files.includes('global.json');
-  check(!(node&&dotnet),'AMBIGUOUS_BUILD');
-  const mode=node?'node':dotnet?'dotnet':'none';
-  check(mode!=='none'||!files.some(p=>/\.(?:[cm]?[jt]sx?|cs|py|go|rs|java|cpp|c)$/.test(p)),'UNSUPPORTED_BUILD');
+  const mode=buildMode(files);
+  if(mode==='python')for(const path of ['pyproject.toml','requirements-build.txt'])await regular(workspace,path);
   return {input,files,mode};
 }
 export async function main(env=process.env) {

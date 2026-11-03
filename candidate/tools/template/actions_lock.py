@@ -78,27 +78,9 @@ def check_graph(lock):
     require(reachable(lock, roots) == set(lock['dependencies']), 'UNREACHABLE_DEPENDENCY')
 
 
-def check_rewrite(original, generated, dependencies, path=()):
-    """Official SHA-to-ref rendering is temporary; source YAML bytes stay authoritative."""
-    if original == generated:
-        return
-    if isinstance(original, dict) and isinstance(generated, dict):
-        require(original.keys() == generated.keys(), 'WORKFLOW_REWRITE')
-        for key in original:
-            check_rewrite(original[key], generated[key], dependencies, (*path, key))
-    elif isinstance(original, list) and isinstance(generated, list):
-        require(len(original) == len(generated), 'WORKFLOW_REWRITE')
-        for index, value in enumerate(original):
-            check_rewrite(value, generated[index], dependencies, (*path, index))
-    else:
-        # Only a step Action may be rendered to its official locked ref. A reusable
-        # workflow call has no steps component and must retain its exact source SHA.
-        require(path and path[-1] == 'uses' and 'steps' in path
-                and isinstance(original, str) and isinstance(generated, str), 'WORKFLOW_REWRITE')
-        pin = PIN.fullmatch(original)
-        entry = dependencies.get(generated)
-        require(pin and entry and generated == pin[1] + '@' + entry['ref']
-                and entry['commit'] == 'sha1-' + pin[2], 'WORKFLOW_REWRITE')
+def check_rewrite(original, generated):
+    """Restore formatting only; changing a uses ref invalidates its native lock key."""
+    require(original == generated, 'WORKFLOW_REWRITE')
 
 
 def direct_pins(files, paths, action):
@@ -168,7 +150,7 @@ def prepare(target, before_copier, run):
     for name in names & changed:
         try:
             check_rewrite(yaml.load(original[name], Loader=yaml.BaseLoader),
-                          yaml.load(generated[name], Loader=yaml.BaseLoader), lock['dependencies'])
+                          yaml.load(generated[name], Loader=yaml.BaseLoader))
         except yaml.YAMLError as error:
             raise LockFailure('WORKFLOW_PARSE') from error
         (target / name).write_bytes(original[name])
