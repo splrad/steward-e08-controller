@@ -56,3 +56,13 @@ it('lists external 404/410 repairs separately from authentication, throttling, s
   expect(result.map((r:any)=>r.status)).toEqual(['REPAIR_REQUIRED','REPAIR_REQUIRED','UNKNOWN','UNKNOWN','UNKNOWN','UNKNOWN','UNKNOWN','OK']);
   expect(result[0]).toMatchObject({document:'doc.md',url:'https://test.invalid/404',nativeStatus:{code:404}});
 });
+it('admits the hash-locked Python build interface and rejects incomplete or ambiguous projects',async()=>{
+  const {buildMode}=await script('validation-input');
+  expect(buildMode(['pyproject.toml','requirements-build.txt','src/product/__init__.py'])).toBe('python');
+  expect(()=>buildMode(['pyproject.toml','src/product/__init__.py'])).toThrow('PYTHON_BUILD_LOCK_MISSING');
+  expect(()=>buildMode(['src/product/__init__.py'])).toThrow('UNSUPPORTED_BUILD');
+  for(const other of [['package.json'],['CADFontAutoReplace.slnx','global.json']])
+    expect(()=>buildMode(['pyproject.toml','requirements-build.txt',...other])).toThrow('AMBIGUOUS_BUILD');
+  expect(buildMode(['package.json','tools/script.py'])).toBe('node');
+  expect(buildMode(['README.md'])).toBe('none');
+});

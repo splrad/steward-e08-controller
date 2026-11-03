@@ -163,6 +163,23 @@ jobs:
           npm run typecheck
           npm run verify:config
           npm run verify:dist
+      - name: Python locked build and tests
+        if: needs.scope.outputs.mode == 'python'
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          POLICY_PYTHON="$(cd "$GITHUB_WORKSPACE/policy" && python -I -c 'import sys; print(sys.executable)')"
+          VENV="$RUNNER_TEMP/python-validation"
+          OUT="$RUNNER_TEMP/python-validation-dist"
+          uv venv --no-config --no-python-downloads --python "$POLICY_PYTHON" "$VENV"
+          if [ "$RUNNER_OS" = Windows ]; then BUILD_PYTHON="$VENV/Scripts/python.exe"; else BUILD_PYTHON="$VENV/bin/python"; fi
+          uv pip sync --no-config --python "$BUILD_PYTHON" --default-index https://pypi.org/simple --require-hashes --only-binary :all: requirements-build.txt
+          "$BUILD_PYTHON" -I -m compileall -q .
+          uv build --no-config --offline --no-sources --no-build-isolation --python "$BUILD_PYTHON" --out-dir "$OUT" .
+          "$BUILD_PYTHON" -I -m twine check "$OUT"/*
+          uv pip install --no-config --offline --python "$BUILD_PYTHON" --no-deps "$OUT"/*.whl
+          if [ -d tests ]; then "$BUILD_PYTHON" -I -m unittest discover -s tests; fi
       - name: Applicability
         env:
           SELECTED: ${{ needs.scope.outputs.source }}
@@ -247,6 +264,23 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           dotnet build CADFontAutoReplace.slnx --no-restore -c Release
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Python locked build and tests
+        if: needs.scope.outputs.mode == 'python'
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          POLICY_PYTHON="$(cd "$GITHUB_WORKSPACE/policy" && python -I -c 'import sys; print(sys.executable)')"
+          VENV="$RUNNER_TEMP/python-validation"
+          OUT="$RUNNER_TEMP/python-validation-dist"
+          uv venv --no-config --no-python-downloads --python "$POLICY_PYTHON" "$VENV"
+          if [ "$RUNNER_OS" = Windows ]; then BUILD_PYTHON="$VENV/Scripts/python.exe"; else BUILD_PYTHON="$VENV/bin/python"; fi
+          uv pip sync --no-config --python "$BUILD_PYTHON" --default-index https://pypi.org/simple --require-hashes --only-binary :all: requirements-build.txt
+          "$BUILD_PYTHON" -I -m compileall -q .
+          uv build --no-config --offline --no-sources --no-build-isolation --python "$BUILD_PYTHON" --out-dir "$OUT" .
+          "$BUILD_PYTHON" -I -m twine check "$OUT"/*
+          uv pip install --no-config --offline --python "$BUILD_PYTHON" --no-deps "$OUT"/*.whl
+          if [ -d tests ]; then "$BUILD_PYTHON" -I -m unittest discover -s tests; fi
       - name: Applicability
         env:
           SELECTED: ${{ needs.scope.outputs.source }}

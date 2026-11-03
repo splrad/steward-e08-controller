@@ -72,7 +72,7 @@ class LockTests(unittest.TestCase):
             calls.append(mode)
             fixture_tool(mode, target)
             if mode == 'generate':
-                self.path.write_text(YAML.replace('@' + SHA, '@fixture-' + SHA), encoding='utf-8')
+                self.path.write_text(YAML + '# tool formatting only\n', encoding='utf-8')
         result = lock.prepare(self.root, before, tool)
         self.assertEqual(result['workflows'], 3)
         self.assertEqual(calls, ['generate', 'verify'])
@@ -81,6 +81,20 @@ class LockTests(unittest.TestCase):
         again = lock.prepare(self.root, after, fixture_tool)
         self.assertEqual(again['affectedWorkflows'], [])
         self.assertEqual(bridge.paths_in_tree(self.root), after)
+
+    def test_same_commit_tag_rewrite_is_rejected_before_verification(self):
+        before = bridge.paths_in_tree(self.root)
+        calls = []
+        def tool(mode, target):
+            calls.append(mode)
+            fixture_tool(mode, target)
+            if mode == 'generate':
+                # The CLI can report this alias valid while the runner rejects
+                # the restored full-SHA workflow because its exact key is absent.
+                self.path.write_text(YAML.replace('@' + SHA, '@fixture-' + SHA), encoding='utf-8')
+        with self.assertRaisesRegex(lock.LockFailure, 'WORKFLOW_REWRITE'):
+            lock.prepare(self.root, before, tool)
+        self.assertEqual(calls, ['generate'])
 
     def test_managed_rename_delete_and_new_dependency_preserve_manual_lock_entries(self):
         manual = self.path.parent / 'manual.yml'
