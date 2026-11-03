@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build": "node scripts/build-runner.mjs",
-    "test": "npm run test:pages && vitest run",
+    "test": "uv sync --project tools/template --frozen --only-group release-inspection --inexact --no-build && npm run test:pages && vitest run",
     "test:pages": "node --test scripts/test/select-pages-source.test.mjs scripts/test/pages-wiring.test.mjs",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.runtime.json --noEmit && node scripts/verify-source-boundaries.mjs",
     "verify:config": "node scripts/verify-config.mjs",

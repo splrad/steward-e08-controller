@@ -59,6 +59,21 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Activate trusted controller tool paths
+        working-directory: controller
+        shell: pwsh
+        env:
+          MISE_SAFE: '1'
+          MISE_LOCKED: '1'
+        run: |
+          $toolPaths = mise bin-paths
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $toolPaths | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Install locked native metadata reader
+        shell: pwsh
+        run: |
+          uv sync --project controller/tools/template --frozen --only-group release-inspection --no-build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Read canonical dispatch and source
         id: identity
         shell: pwsh

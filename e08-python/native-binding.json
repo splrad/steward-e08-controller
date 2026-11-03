@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "scope": "Only existing E08 controller/product/App identities; no permission or behavior substitution",
+  "bindings": [
+    {
+      "file": "packages/runner/src/release-pipeline.js",
+      "sourceSha256": "fc8147fdd6c180c13a1231307746e7d3c8a64600f651985de4c52db28f6db239",
+      "compiledBeforeSha256": "d7af494cc3e599246201db7b4a8858daf109ccc17bc31799accb9554e982d98d",
+      "compiledAfterSha256": "5beb7f259c8973a312925ffcf8f92aa5dfca917c5c04c9256317083cb9b31395",
+      "replacements": [
+        {
+          "from": "splrad-steward",
+          "to": "splrad-e08-release",
+          "count": 6
+        },
+        {
+          "from": "splrad/steward",
+          "to": "splrad/steward-e08-controller",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "file": "packages/runner/src/native-release-evidence.js",
+      "sourceSha256": "2875abafa7eb46ca2aab0f371ca7d363961ed6ee49b6ac965dc8c95661b274c4",
+      "compiledBeforeSha256": "ceb99eda0061f2187d41744f118f2d6eadab8c41445cbd787bc164d6e3379814",
+      "compiledAfterSha256": "12abe0aab622c826696013a34e81e58219d6d5955ad46acb06e3a5d2bd95c9eb",
+      "replacements": [
+        {
+          "from": "splrad/steward",
+          "to": "splrad/steward-e08-controller",
+          "count": 2
+        },
+        {
+          "from": "splrad\\/steward\\/",
+          "to": "splrad\\/steward-e08-controller\\/",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "file": "packages/github/src/app-auth.js",
+      "sourceSha256": "22c9426e7200e71a388dc4ed28bcb701c920693e70e14123c569bfe0a1fac117",
+      "compiledBeforeSha256": "12d2017daddaebd0fecda4ae224be0e8a008f33a942e45be0afef00bfa4bb913",
+      "compiledAfterSha256": "d21b57c49e7cd59b4f09fd23083405e9745878aa514f21a653de288b9ecc1161",
+      "replacements": [
+        {
+          "from": "4243096",
+          "to": "5553347",
+          "count": 3
+        },
+        {
+          "from": "301115370",
+          "to": "350673636",
+          "count": 1
+        },
+        {
+          "from": "Iv23liuSr0qd4WLJdZhH",
+          "to": "Iv23liu2OIRtzR11gmWk",
+          "count": 2
+        },
+        {
+          "from": "splrad-steward-release",
+          "to": "splrad-e08-release",
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "name": "commit.hbs",
+      "bytes": 1193,
+      "sha256": "767f12161499cebdb44c1cbbbe0040222e66aabe6ce940a72b1c1268a3b08a99"
+    },
+    {
+      "name": "commit1.hbs",
+      "bytes": 669,
+      "sha256": "0c55463bbfac1976d66cb9f7e35f4114c07dc6b35a3d31455b85094c3e91bed9"
+    },
+    {
+      "name": "footer.hbs",
+      "bytes": 111,
+      "sha256": "de814f47109202cb0f320a6474fb54a5ac6707454a894a205c544d5f1df607c0"
+    },
+    {
+      "name": "footer1.hbs",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "header.hbs",
+      "bytes": 172,
+      "sha256": "edeba21f42abb979d6e19fdcb2c9fdd039e3ffe252cd056fb4c7668fead5907d"
+    },
+    {
+      "name": "header1.hbs",
+      "bytes": 171,
+      "sha256": "2437dc15d41a68ed115b66e21a65ae3c6397f764ded3afd2dc28f6a8c19b8209"
+    },
+    {
+      "name": "index.js",
+      "bytes": 2122879,
+      "sha256": "8253ef810601f2ca985caf0a148f7d391c23a0fdfa82ed529c88da6595b756b9"
+    },
+    {
+      "name": "package.json",
+      "bytes": 23,
+      "sha256": "3ca9d4afd21425087cf31893b8f9f63c81b0b8408db5e343ca76e5f8aa26ab9a"
+    },
+    {
+      "name": "template.hbs",
+      "bytes": 113,
+      "sha256": "b6eed3761fb93f72ca586c132fd941104921a47530a8a7da1c4185eafc982324"
+    },
+    {
+      "name": "template1.hbs",
+      "bytes": 302,
+      "sha256": "6e2dba431e8f781dc9b3d21512f8f31a5c2a0c97244e350bcd9c9aeb977a57dc"
+    }
+  ]
+}

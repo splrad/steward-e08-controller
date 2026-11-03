@@ -13,7 +13,7 @@
     "test:pages": "npm --prefix candidate run test:pages",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.runtime.json --noEmit && node scripts/verify-source-boundaries.mjs",
     "verify:config": "node scripts/verify-config.mjs",
-    "verify:dist": "node scripts/verify-dist.mjs",
+    "verify:dist": "node scripts/verify-dist.mjs && node e08-python/build-native.mjs --verify",
     "verify:workflows": "node scripts/verify-workflows.mjs",
     "verify": "npm run test && npm run typecheck && npm run verify:config && npm run verify:dist && npm run verify:workflows",
     "test:settings": "node --test tools/settings-sync/entry.test.cjs",
