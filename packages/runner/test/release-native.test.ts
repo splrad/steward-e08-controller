@@ -20,15 +20,18 @@ describe.skipIf(process.platform !== 'win32')('native Windows versions and bound
   let root: string;
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), 'native-release-test-')); registerOfflineFixtureRoot(root); permitOfflineScript(resolve('scripts/inspect-native-release.ps1'));
+    // A PE inspection fixture needs no HTTPS certificate, telemetry, or global tool PATH initialization.
+    const dotnetEnvironment = { ...isolatedBuildEnvironment(process.env, root), DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false',
+      DOTNET_CLI_TELEMETRY_OPTOUT: 'true', DOTNET_ADD_GLOBAL_TOOLS_TO_PATH: 'false' };
     await writeFile(join(root, 'NativeFixture.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Version>1.2.3</Version><FileVersion>1.2.3.0</FileVersion><InformationalVersion>1.2.3+fixture</InformationalVersion></PropertyGroup></Project>');
     await writeFile(join(root, 'NativeFixture.cs'), 'public class NativeFixture {}');
     permitOfflineScript(join(root, 'NativeFixture.csproj'));
-    await promisify(execFile)('dotnet', ['build', join(root, 'NativeFixture.csproj'), '-o', join(root, 'compiled')], { env: isolatedBuildEnvironment(process.env, root), timeout: 60000, windowsHide: true });
+    await promisify(execFile)('dotnet', ['build', join(root, 'NativeFixture.csproj'), '-o', join(root, 'compiled')], { env: dotnetEnvironment, timeout: 60000, windowsHide: true });
     await copyFile(join(root, 'compiled/NativeFixture.dll'), join(root, 'fixture.dll'));
     for (const revision of [0, 4]) {
       const output = join(root, `compiled-${revision}`);
       permitOfflineScript(join(root, 'NativeFixture.csproj'));
-    await promisify(execFile)('dotnet', ['build', join(root, 'NativeFixture.csproj'), `-p:InformationalVersion=1.2.3.${revision}`, '-o', output], { env: isolatedBuildEnvironment(process.env, root), timeout: 60000, windowsHide: true });
+    await promisify(execFile)('dotnet', ['build', join(root, 'NativeFixture.csproj'), `-p:InformationalVersion=1.2.3.${revision}`, '-o', output], { env: dotnetEnvironment, timeout: 60000, windowsHide: true });
       await copyFile(join(output, 'NativeFixture.dll'), join(root, `fixture-${revision}.dll`));
     }
     await writeFile(join(root, 'fixture.ps1'), `param($Root)

@@ -27,7 +27,9 @@ export async function nativeReleaseCandidate(request, { token, readToken, copilo
     { cwd: request.directory, env, encoding: 'buffer', windowsHide: true, timeout: 90_000, maxBuffer: 64 * 1024 * 1024 })).stdout;
   const api = async (method, path, body, allow404 = false) => {
     if (!path.startsWith(`/repos/${request.repository}/`) && !/^\/users\/[A-Za-z0-9-]+(?:\[bot\])?$/.test(decodeURIComponent(path))) fail('CANDIDATE_API_PATH');
-      const credential = method === 'GET' ? readToken : token;
+    // The parent already holds Actions read; the Release Please child stays read-only content/PR scoped.
+    const workflowInventory = path.split('?')[0] === `/repos/${request.repository}/actions/workflows`;
+    const credential = method === 'GET' && !workflowInventory ? readToken : token;
     const response = await fetcher('https://api.github.com' + path, { method, redirect: 'error', signal: AbortSignal.timeout(60_000),
       headers: { authorization: 'Bearer ' + credential, accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2026-03-10', 'content-type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }) });

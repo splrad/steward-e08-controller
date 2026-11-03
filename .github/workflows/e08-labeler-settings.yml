@@ -1,0 +1,63 @@
+name: E08 Labeler Settings / Full Sync
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Apply the reviewed NOP plan to controller label metadata
+        type: boolean
+        default: false
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: e08-controller-labeler-settings
+  cancel-in-progress: false
+jobs:
+  settings-sync:
+    if: github.repository_id == '1440689456' && github.repository == 'splrad/steward-e08-controller' && github.ref == 'refs/heads/e08-channel-trunk'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: steward-automation
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: github-community-projects/safe-settings
+          # renovate: datasource=github-tags depName=github-community-projects/safe-settings
+          ref: a9a1f366ad6a738b55682d346d94f8d6c4893b09 # 3.0.0
+          path: .safe-settings-code
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        env:
+          MISE_SAFE: '1'
+          MISE_NODE_COMPILE: 'false'
+        with:
+          version: 2026.10.24
+          install_args: --locked
+          cache: false
+          env: false
+          persist_github_token: false
+      - name: Install upstream locked dependencies
+        working-directory: .safe-settings-code
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run upstream full sync
+        working-directory: .safe-settings-code
+        env:
+          GH_ORG: splrad
+          ADMIN_REPO: steward-e08-controller
+          CONFIG_PATH: safe-settings
+          SETTINGS_FILE_PATH: settings.yml
+          DEPLOYMENT_CONFIG_FILE: ${{ github.workspace }}/safe-settings/e08-controller-labels.deployment.yml
+          APP_ID: ${{ vars.GOVERNANCE_APP_ID }}
+          PRIVATE_KEY: ${{ secrets.GOVERNANCE_APP_PRIVATE_KEY }}
+          FULL_SYNC_NOP: ${{ inputs.apply && 'false' || 'true' }}
+          CREATE_DEFAULT_BRANCH: 'false'
+          CREATE_PR_COMMENT: 'false'
+          CREATE_ERROR_ISSUE: 'false'
+          LOG_LEVEL: info
+        run: npm run full-sync

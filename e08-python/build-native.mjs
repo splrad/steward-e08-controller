@@ -19,6 +19,8 @@ const definitions=[
   ['splrad/steward','splrad/steward-e08-controller'],['splrad\\/steward\\/','splrad\\/steward-e08-controller\\/']]],
  ['packages/runner/src/native-release-cli.js',[
   ['splrad-steward','splrad-e08-release']]],
+ ['packages/runner/src/release-publication.js',[
+  ['splrad/steward','splrad/steward-e08-controller'],['1296724484','1440689456']]],
  ['packages/github/src/app-auth.js',[
   ['4243096','5553347'],['301115370','350673636'],['Iv23liuSr0qd4WLJdZhH','Iv23liu2OIRtzR11gmWk'],['splrad-steward-release','splrad-e08-release']]],
 ];

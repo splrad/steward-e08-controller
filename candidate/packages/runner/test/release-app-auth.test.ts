@@ -99,3 +99,23 @@ it('rejects widened template credentials before invoking delivery',async()=>{
   await expect(app.forTemplateRepository(12,async()=>{calls++;})).rejects.toThrow('TEMPLATE_TOKEN_SCOPE');
   expect(calls).toBe(0);expect(f.revoked).toHaveLength(2);
 });
+
+it.each([false,true])('borrows only candidate-read capability and revokes it, operation fails=%s',async fails=>{
+  const f=fixture(),app=await nativeReleaseApp(key,f.fetcher);
+  const operation=app.forCandidateReadRepository(12,async read=>{expect(read).toBeTruthy();if(fails)throw Error('read failed');return 'read complete';});
+  if(fails)await expect(operation).rejects.toThrow('read failed');else await expect(operation).resolves.toBe('read complete');
+  expect(f.minted).toEqual([{repository_ids:[12],permissions:{metadata:'read',contents:'read',pull_requests:'read',issues:'read'}}]);
+  expect(f.revoked).toHaveLength(1);
+});
+it('rejects widened candidate-read scope before callback and revokes the credential',async()=>{
+  const f=fixture(),app=await nativeReleaseApp(key,f.fetcher);f.setExtraScope();let called=false;
+  await expect(app.forCandidateReadRepository(12,async()=>{called=true;})).rejects.toThrow('RELEASE_TOKEN_SCOPE');
+  expect(called).toBe(false);expect(f.revoked).toHaveLength(1);
+});
+
+it('revokes independent PR reader and release writer when a nested adoption read fails',async()=>{
+  const f=fixture(),app=await nativeReleaseApp(key,f.fetcher);
+  await expect(app.forRepository(12,async()=>app.forCandidateReadRepository(12,async()=>{throw Error('event page denied');}))).rejects.toThrow('event page denied');
+  expect(f.minted).toHaveLength(2);expect(f.revoked).toHaveLength(2);
+  expect(f.minted[0].permissions.pull_requests).toBeUndefined();expect(f.minted[1].permissions.pull_requests).toBe('read');
+});

@@ -45,13 +45,20 @@ it('runs the native candidate adapter through protected state, real Git, upstrea
   const fetcher = (async (input, init) => {
     const url = new URL(String(input)), method = init?.method ?? 'GET', path = decodeURIComponent(url.pathname), body = init?.body ? JSON.parse(String(init.body)) : null;
     requests.push({ method, path, body }); expect(url.origin).toBe('https://api.github.com'); let value: any;
+    if (method === 'GET' && (path.includes('/git/ref/heads/') || path.endsWith('/pulls')))
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer fixture-read');
     if (path.includes('/git/ref/heads/')) { const branch = path.split('/git/ref/heads/')[1]!, sha = await head(branch); if (!sha) return new Response('{}', { status: 404 }); value = { ref: `refs/heads/${branch}`, object: { sha, type: 'commit' } }; }
     else if (path.endsWith('/rules/branches/main')) value = [{ type: 'non_fast_forward' }, { type: 'deletion' }];
     else if (releaseProtectionFixture(path)) value = releaseProtectionFixture(path);
     else if (path.endsWith('/rulesets/6')) value = { id: 6, target: 'tag', enforcement: 'active', conditions: { ref_name: { include: ['~ALL'], exclude: [] } }, rules: [{ type: 'deletion' }, { type: 'non_fast_forward' }] };
     else if (path.endsWith('/rulesets')) value = [{ id: 6, target: 'tag', enforcement: 'active' }];
     else if (path.endsWith('/releases') || path.endsWith('/tags')) value = [];
-    else if (path.endsWith('/actions/workflows')) value = { total_count: 0, workflows: [] };
+    else if (path.endsWith('/actions/workflows')) {
+      // Private workflow inventory needs Actions read, held only by the trusted parent credential.
+      if (new Headers(init?.headers).get('authorization') !== 'Bearer fixture-write')
+        return new Response('{}', { status: 403 });
+      value = { total_count: 0, workflows: [] };
+    }
     else if (path.endsWith('/pulls') && method === 'POST') {
       pr = { number: 9, head: { repo: { id: 1 }, ref: body.head, sha: await head(body.head) }, base: { ref: 'main', repo: { id: 1 } }, state: 'open', merged_at: null, labels: [], title: body.title, body: body.body };
       throw new Error('accepted create response lost');

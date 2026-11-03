@@ -6,7 +6,7 @@ import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {pathToFileURL} from 'node:url';
-import {registerOfflineFixtureRoot} from './offline-fixtures.js';
+import {registerOfflineFixtureRoot,permitOfflineScript} from './offline-fixtures.js';
 import {isolatedBuildEnvironment} from '../src/build-environment.js';
 import {prepareBuildDispatch} from '../src/release-run.js';
 const {initializeReleaseAdoption,withReleaseAdoption,recoverReleaseCaches}=await import(pathToFileURL(resolve('scripts/release-adoption.mjs')).href);
@@ -65,6 +65,23 @@ it.each(['unmerged','base','repository','A','unreadable'])('rejects adoption %s 
 it('does not require empty-repository bootstrap evidence to verify A',async()=>{
   const f=await fixture(),result=await withReleaseAdoption(f.request,f.request.releaseAdoption,f.io,async(proof:any)=>({head:proof.defaultHead,reachable:proof.reachable}));
   expect(result).toEqual({head:f.A,reachable:[]});expect(await f.stateHead()).toBeNull();
+});
+it.each(['match','mismatch','dynamic','oversized'])('verifies Python source metadata from the actual adopted Git history: %s',async kind=>{
+  const f=await fixture();permitOfflineScript(resolve('scripts/inspect-python-release.py'));
+  const config={'separate-pull-requests':false,'include-component-in-tag':false,packages:{'.':{'release-type':'python','initial-version':'1.0.0'}}};
+  await writeFile(join(f.request.directory,'release-please-config.json'),JSON.stringify(config));
+  await writeFile(join(f.request.directory,'pyproject.toml'),kind==='dynamic'
+    ? '[project]\nname = "adoption-fixture"\ndynamic = ["version"]\n'
+    : '[project]\nname = "adoption-fixture"\nversion = "1.0.0"\n'+(kind==='oversized'?' '.repeat(512*1024):''));
+  await f.git('add','release-please-config.json','pyproject.toml');await f.git('commit','--signoff','-m','Adopt Python fixture');
+  const A=await f.git('rev-parse','HEAD');f.request.releaseAdoption.sourceSha=A;f.pull.merge_commit_sha=A;
+  const version=kind==='mismatch'?'1.0.1':'1.0.0';
+  await writeFile(join(f.request.directory,'.release-please-manifest.json'),JSON.stringify({'.':version})+'\n');
+  await f.git('add','.release-please-manifest.json');await f.git('commit','--signoff','-m','chore: release Python fixture');
+  const S=await f.git('rev-parse','HEAD'),cycle={sourceSha:S,prNumber:8,units:[{id:'layerscape',version,tag:'v'+version}]};
+  const run=()=>withReleaseAdoption(f.request,f.request.releaseAdoption,f.io,(proof:any)=>proof.verifySource({number:8,merge_commit_sha:S},cycle));
+  if(kind==='match')expect(await run()).toBe(true);else await expect(run()).rejects.toThrow();
+  expect(await f.stateHead()).toBeNull();
 });
 it('refuses initialization when the native state ref disappeared but local protected history remains',async()=>{
   const f=await fixture();await f.git('update-ref','refs/heads/steward/release-state',f.A);

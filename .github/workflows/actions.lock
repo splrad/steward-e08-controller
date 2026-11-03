@@ -3,6 +3,9 @@
 # Docs: https://gh.io/actions-lockfile
 version: 'v0.0.3'
 workflows:
+    '.github/workflows/e08-labeler-settings.yml':
+        - 'actions/checkout@v7.0.1'
+        - 'jdx/mise-action@v5.2.4'
     '.github/workflows/e08-model-environments.yml':
         - 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
         - 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'
@@ -22,6 +25,8 @@ workflows:
         - 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
         - 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'
         - 'jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d'
+    '.github/workflows/pr-labeler.yml':
+        - 'actions/labeler@v7.0.0'
     '.github/workflows/pr-title.yml':
         - 'amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50'
     '.github/workflows/pr-validation-native.yml':
@@ -32,6 +37,10 @@ workflows:
         - 'dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d'
         - 'jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d'
     '.github/workflows/product-release.yml':
+        - 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
+        - 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'
+        - 'jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d'
+    '.github/workflows/release.yml':
         - 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
         - 'actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'
         - 'jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d'
@@ -50,6 +59,11 @@ dependencies:
         commit: 'sha1-3d3c42e5aac5ba805825da76410c181273ba90b1'
         owner_id: 44036562
         repo_id: 197814629
+    'actions/checkout@v7.0.1':
+        ref: 'v7.0.1'
+        commit: 'sha1-3d3c42e5aac5ba805825da76410c181273ba90b1'
+        owner_id: 44036562
+        repo_id: 197814629
     'actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510':
         ref: 'v3.3.0'
         commit: 'sha1-64ab729a6294000f5aa4a4bc0b73d1f32bc45510'
@@ -60,6 +74,11 @@ dependencies:
         commit: 'sha1-a1d282b36b6f3519aa1f3fc636f609c47dddb294'
         owner_id: 44036562
         repo_id: 476372928
+    'actions/labeler@v7.0.0':
+        ref: 'v7.0.0'
+        commit: 'sha1-bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13'
+        owner_id: 44036562
+        repo_id: 177139928
     'actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68':
         ref: 'v6.0.0'
         commit: 'sha1-a98b56852c35b8e3190ac28c8c2271da59106c68'
@@ -81,6 +100,11 @@ dependencies:
         owner_id: 1588572
         repo_id: 265601040
     'jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d':
+        ref: 'v5.2.4'
+        commit: 'sha1-6be3c7ed4c21d4f76b208d351d95aac273ebb76d'
+        owner_id: 216188
+        repo_id: 738284564
+    'jdx/mise-action@v5.2.4':
         ref: 'v5.2.4'
         commit: 'sha1-6be3c7ed4c21d4f76b208d351d95aac273ebb76d'
         owner_id: 216188

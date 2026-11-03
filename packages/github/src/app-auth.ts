@@ -70,6 +70,14 @@ export async function nativeReleaseApp(privateKey: string, transport: typeof fet
       if(scope.total_count!==1||scope.repositories.length!==1||scope.repositories[0]?.id!==repositoryId)throw new Error('QUALITY_TOKEN_SCOPE');
       return await operation(credential.token);
     }finally{await credential.revoke();}
+  },async forCandidateReadRepository<T>(repositoryId:number,operation:(readToken:string)=>Promise<T>):Promise<T>{
+    if(!Number.isSafeInteger(repositoryId)||repositoryId<1)throw new Error('RELEASE_REPOSITORY_ID');
+    const credential=await token(repositoryId,'candidate-read');
+    try {
+      const scope=(await credential.client.request('GET /installation/repositories',{per_page:100})).data;
+      if(scope.total_count!==1||scope.repositories.length!==1||scope.repositories[0]?.id!==repositoryId)throw new Error('RELEASE_TOKEN_SCOPE');
+      return await operation(credential.token);
+    }finally{await credential.revoke();}
   },async forCandidateRepository<T>(repositoryId:number,operation:(writeToken:string,readToken:string)=>Promise<T>):Promise<T>{
     if(!Number.isSafeInteger(repositoryId)||repositoryId<1)throw new Error('RELEASE_REPOSITORY_ID');
     const write=await token(repositoryId,'candidate');

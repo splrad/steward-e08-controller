@@ -16,7 +16,6 @@ workflows:
         - 'jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e'
         - 'jdx/mise-action@v5.2.3'
     '.github/workflows/pr-labeler.yml':
-        - 'actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13'
         - 'actions/labeler@v7.0.0'
     '.github/workflows/pr-title.yml':
         - 'amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50'
@@ -100,11 +99,6 @@ dependencies:
         commit: 'sha1-a1d282b36b6f3519aa1f3fc636f609c47dddb294'
         owner_id: 44036562
         repo_id: 476372928
-    'actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13':
-        ref: 'v7.0.0'
-        commit: 'sha1-bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13'
-        owner_id: 44036562
-        repo_id: 177139928
     'actions/labeler@v7.0.0':
         ref: 'v7.0.0'
         commit: 'sha1-bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13'
