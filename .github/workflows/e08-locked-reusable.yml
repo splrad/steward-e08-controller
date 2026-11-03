@@ -1,0 +1,27 @@
+name: E08 locked reusable definition
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  definition-lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Caller local action
+        uses: ./.github/actions/e08-local
+      - name: Record definition identity
+        env:
+          DEFINITION_REPOSITORY: ${{ job.workflow_repository }}
+          DEFINITION_SHA: ${{ job.workflow_sha }}
+          DEFINITION_PATH: ${{ job.workflow_file_path }}
+        run: |
+          echo "E08_DEFINITION_REPOSITORY=$DEFINITION_REPOSITORY"
+          echo "E08_DEFINITION_SHA=$DEFINITION_SHA"
+          echo "E08_DEFINITION_PATH=$DEFINITION_PATH"
+          echo 'E08_SHARED_LOCK_COMPLETED'
