@@ -162,7 +162,7 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           npx --no-install vitest run packages/runner/test/governance-promotion.test.ts
           npm run typecheck
-          npm run verify:config
+          npm run verify:config -- --toolchain-root "$GITHUB_WORKSPACE/policy"
           npm run verify:dist
           npm ci --prefix tools/quality-language --ignore-scripts --no-audit --no-fund
           npm test --prefix tools/quality-language
@@ -175,7 +175,7 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           npm test
           npm run typecheck
-          npm run verify:config
+          npm run verify:config -- --toolchain-root "$GITHUB_WORKSPACE/policy"
           npm run verify:dist
       - name: Applicability
         env:
@@ -243,7 +243,7 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           npx --no-install vitest run packages/runner/test/governance-promotion.test.ts
           npm run typecheck
-          npm run verify:config
+          npm run verify:config -- --toolchain-root "$GITHUB_WORKSPACE/policy"
           npm run verify:dist
           npm ci --prefix tools/quality-language --ignore-scripts --no-audit --no-fund
           npm test --prefix tools/quality-language
@@ -256,7 +256,7 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           npm test
           npm run typecheck
-          npm run verify:config
+          npm run verify:config -- --toolchain-root "$GITHUB_WORKSPACE/policy"
           npm run verify:dist
       - name: Parse PowerShell and MSBuild inputs
         if: needs.scope.outputs.source == 'true' || needs.scope.outputs.governance == 'true'

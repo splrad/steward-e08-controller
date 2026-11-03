@@ -2,7 +2,9 @@ import {readFile} from 'node:fs/promises';
 import {verifyToolchain} from './verify-toolchain.mjs';
 import {assertRepositoryInstructions} from '../packages/runner/dist/index.js';
 import YAML from 'yaml';
-await verifyToolchain();
+const args=process.argv.slice(2);
+if(args.length && (args.length!==2||args[0]!=='--toolchain-root'||!args[1]))throw Error('CONFIG_ARGUMENTS');
+await verifyToolchain(process.cwd(),args[1]);
 await assertRepositoryInstructions(process.cwd(),await readFile('templates/repository/AGENTS.md'));
 const organizationInstructions=await readFile('config/review/copilot-organization.md','utf8');
 if(organizationInstructions.includes('\r')||organizationInstructions.startsWith('\uFEFF')||!organizationInstructions.endsWith('\n')
