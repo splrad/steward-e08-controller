@@ -80,15 +80,32 @@ def check_rewrite(original, generated, dependencies, path=()):
                 and entry['commit'] == 'sha1-' + pin[2], 'WORKFLOW_REWRITE')
 
 
-def check_delta(before, after, changed):
+def direct_pins(files, paths, action):
+    result = set()
+    for path in paths:
+        if path not in files:
+            continue
+        value = yaml.load(files[path], Loader=yaml.BaseLoader)
+        jobs = value.get('jobs', {}) if isinstance(value, dict) else {}
+        if not isinstance(jobs, dict):
+            continue
+        for job in jobs.values():
+            if not isinstance(job, dict) or not isinstance(job.get('steps', []), list):
+                continue
+            for step in job.get('steps', []):
+                uses = step.get('uses') if isinstance(step, dict) else None
+                pin = PIN.fullmatch(uses) if isinstance(uses, str) else None
+                if pin and pin[1] == action:
+                    result.add('sha1-' + pin[2])
+    return result
+
+
+def check_delta(before, after, changed, before_files, after_files):
     """Inspect the generated file; never merge or synthesize dependency entries."""
     old, new = before['workflows'], after['workflows']
     for path in old.keys() | new.keys():
         require(path in changed or old.get(path) == new.get(path), 'UNRELATED_WORKFLOW')
     allowed = {key for path in changed for key in old.get(path, []) + new.get(path, [])}
-    for key in before['dependencies'].keys() | after['dependencies'].keys():
-        first, second = before['dependencies'].get(key), after['dependencies'].get(key)
-        require(first == second or (key in allowed and (first is None or second is None)), 'UNRELATED_DEPENDENCY')
     identities = {}
     for lock in [before, after]:
         for key, entry in lock['dependencies'].items():
@@ -96,6 +113,16 @@ def check_delta(before, after, changed):
             identity = (entry['owner_id'], entry['repo_id'])
             require(repository not in identities or identities[repository] == identity, 'SOURCE_IDENTITY_CHANGED')
             identities[repository] = identity
+    for key in before['dependencies'].keys() | after['dependencies'].keys():
+        first, second = before['dependencies'].get(key), after['dependencies'].get(key)
+        if first == second or (key in allowed and (first is None or second is None)):
+            continue
+        consumers = {p for p in old.keys() | new.keys() if key in old.get(p, []) + new.get(p, [])}
+        action = key.rsplit('@', 1)[0]
+        require(first is not None and second is not None and consumers <= changed
+                and {k: v for k, v in first.items() if k != 'commit'} == {k: v for k, v in second.items() if k != 'commit'}
+                and direct_pins(before_files, consumers, action) == {first['commit']}
+                and direct_pins(after_files, consumers, action) == {second['commit']}, 'UNRELATED_DEPENDENCY')
 
 
 def prepare(target, before_copier, run):
@@ -123,7 +150,7 @@ def prepare(target, before_copier, run):
         (target / name).write_bytes(original[name])
     affected = {p for p in workflows(before_copier) | names if before_copier.get(p) != original.get(p)}
     if prior is not None:
-        check_delta(prior, lock, affected)
+        check_delta(prior, lock, affected, before_copier, original)
     expected = copier.paths_in_tree(target)
     run('verify', target)
     require(copier.paths_in_tree(target) == expected, 'VERIFY_MUTATION')

@@ -107,6 +107,34 @@ class LockTests(unittest.TestCase):
         with self.assertRaisesRegex(lock.LockFailure, 'UNRELATED_DEPENDENCY'):
             lock.prepare(self.root, before, tool)
 
+    def test_explicit_managed_pin_update_under_same_ref_preserves_unaffected_shared_entries(self):
+        def branch_tool(mode, target):
+            value = fixture_document(target)
+            entries = list(value['dependencies'].values())
+            assert len(entries) == 1
+            value['dependencies'] = {'actions/checkout@main': {**entries[0], 'ref': 'main'}}
+            value['workflows'] = {p: ['actions/checkout@main'] for p in value['workflows']}
+            if mode == 'generate': self.save_lock(value)
+            else: self.assertEqual(lock.document((target / lock.LOCK).read_bytes()), value)
+        branch_tool('generate', self.root)
+        before = bridge.paths_in_tree(self.root)
+        self.path.write_text(YAML.replace(SHA, 'b' * 40), encoding='utf-8')
+        result = lock.prepare(self.root, before, branch_tool)
+        self.assertEqual(result['affectedWorkflows'], ['.github/workflows/managed.yml'])
+        self.assertEqual(lock.document((self.root / lock.LOCK).read_bytes())['dependencies']['actions/checkout@main']['commit'], 'sha1-' + 'b' * 40)
+        # An unchanged workflow also consumes the global dependency entry.
+        manual = self.path.parent / 'manual.yml'
+        manual.write_text(YAML.replace(SHA, 'b' * 40), encoding='utf-8')
+        branch_tool('generate', self.root)
+        before = bridge.paths_in_tree(self.root)
+        self.path.write_text(YAML.replace(SHA, 'c' * 40), encoding='utf-8')
+        def shared_update(mode, target):
+            value = lock.document(before[lock.LOCK])
+            value['dependencies']['actions/checkout@main']['commit'] = 'sha1-' + 'c' * 40
+            self.save_lock(value)
+        with self.assertRaisesRegex(lock.LockFailure, 'UNRELATED_DEPENDENCY'):
+            lock.prepare(self.root, before, shared_update)
+
     def test_source_repository_identity_change_rejected_across_version_keys(self):
         fixture_tool('generate', self.root)
         before = bridge.paths_in_tree(self.root)
