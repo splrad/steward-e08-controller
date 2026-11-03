@@ -168,9 +168,16 @@ if __name__ == "__main__":
             data = Path(sys.argv[2]).read_bytes()
             require(len(data) <= MAX_METADATA)
             document = tomllib.loads(data.decode("utf-8"))
-            project = document.get("project", document.get("tool", {}).get("poetry", {}))
+            if "project" in document:
+                project = document["project"]
+            else:
+                tool = document.get("tool", {})
+                require(isinstance(tool, dict))
+                project = tool.get("poetry", {})
             require(isinstance(project, dict) and isinstance(project.get("version"), str))
-            require("version" not in project.get("dynamic", []))
+            dynamic = project.get("dynamic", [])
+            require(isinstance(dynamic, list) and all(isinstance(field, str) for field in dynamic))
+            require("version" not in dynamic)
             version = Version(project["version"])
             require(version == Version(sys.argv[3]))
             version = str(version)

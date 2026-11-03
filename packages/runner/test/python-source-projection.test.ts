@@ -37,3 +37,10 @@ it.each(['python-stable','python-rc','python-no-lock','node','node-no-lock'])('b
     }
   }
 });
+
+it.each(['1','true','"version"','[1]','["name", false]'])('classifies malformed Python dynamic declaration as a source contract error: %s',async dynamic=>{
+  await expect(nativePythonSourceVersion(process.cwd(),Buffer.from(`[project]\nversion="1.0.0"\ndynamic=${dynamic}\n`),'1.0.0')).rejects.toBeInstanceOf(BuildContractError);
+});
+it.each(['tool = 1','[tool]\npoetry = 1','project = 1'])('classifies malformed Python metadata tables as source contract errors: %s',async content=>{
+  await expect(nativePythonSourceVersion(process.cwd(),Buffer.from(content),'1.0.0')).rejects.toBeInstanceOf(BuildContractError);
+});
