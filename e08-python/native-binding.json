@@ -52,6 +52,24 @@
       ]
     },
     {
+      "file": "packages/runner/src/release-publication.js",
+      "sourceSha256": "5744ec89233d94bd39ed282a65336b0776a04a69b4d64af42c3883e876157d22",
+      "compiledBeforeSha256": "c650d0635f19638074c02a6f79d4b4025dfc6965ea44498ab5b8726ebb95a007",
+      "compiledAfterSha256": "80552dd1cac49c0e40827cd5a2a71e50e84752864bd48ef4abb9712605e64ba9",
+      "replacements": [
+        {
+          "from": "splrad/steward",
+          "to": "splrad/steward-e08-controller",
+          "count": 1
+        },
+        {
+          "from": "1296724484",
+          "to": "1440689456",
+          "count": 1
+        }
+      ]
+    },
+    {
       "file": "packages/github/src/app-auth.js",
       "sourceSha256": "22c9426e7200e71a388dc4ed28bcb701c920693e70e14123c569bfe0a1fac117",
       "compiledBeforeSha256": "12d2017daddaebd0fecda4ae224be0e8a008f33a942e45be0afef00bfa4bb913",
@@ -113,8 +131,8 @@
     },
     {
       "name": "index.js",
-      "bytes": 2123059,
-      "sha256": "fc8ed456c0e417a77a2bccf34cca88caa318ca900f49171dc0ad458c64707dcc"
+      "bytes": 2123074,
+      "sha256": "374dab099d7c1831202b697879c87baeaa3dbc9646027c7ac3446bdea772536c"
     },
     {
       "name": "package.json",

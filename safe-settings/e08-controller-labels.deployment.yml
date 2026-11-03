@@ -1,0 +1,18 @@
+restrictedRepos:
+  include:
+    - steward-e08-controller
+disable_plugins:
+  - repository
+  - archive
+  - collaborators
+  - teams
+  - milestones
+  - branches
+  - autolinks
+  - validator
+  - rulesets
+  - environments
+  - custom_properties
+  - custom_repository_roles
+  - variables
+  - app_installations

@@ -4,11 +4,11 @@ import {mkdtemp,rm,mkdir,readFile,open} from 'node:fs/promises';
 import {join,resolve,isAbsolute} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';
-import {pathToFileURL} from 'node:url';
+import {pathToFileURL,fileURLToPath} from 'node:url';
 import {TagName} from 'release-please/build/src/util/tag-name.js';
 import {Version} from 'release-please/build/src/version.js';
 import {isolatedBuildEnvironment,parseDeliveryConfig,NativeEvidenceReader,nativeEvidenceTransport,
-  inspectNativeCycle,inspectPublications,decodeReleaseRecord,assertRepositoryWrite} from '../packages/runner/dist/index.js';
+  inspectNativeCycle,inspectPublications,decodeReleaseRecord,assertRepositoryWrite,nativePythonSourceVersion} from '../packages/runner/dist/index.js';
 
 const fail=reason=>{throw new Error('RELEASE_ADOPTION: '+reason);};
 const sha=value=>typeof value==='string'&&/^[a-f0-9]{40}$/.test(value);
@@ -32,16 +32,18 @@ export async function withReleaseAdoption(request,adoption,io,operation) {
   const home=await mkdtemp(join(tmpdir(),'steward-adoption-read-'));
   try {
     const env=isolatedBuildEnvironment(process.env,home);
-    const git=async(...args)=>(await promisify(execFile)('git',['--no-replace-objects','--no-optional-locks','-c','core.hooksPath=','-c','core.fsmonitor=false',...args],
-      {cwd:request.directory,env,encoding:'utf8',windowsHide:true,timeout:30_000,maxBuffer:64*1024*1024})).stdout.trim();
+    const gitBytes=async(...args)=>(await promisify(execFile)('git',['--no-replace-objects','--no-optional-locks','-c','core.hooksPath=','-c','core.fsmonitor=false',...args],
+      {cwd:request.directory,env,encoding:'buffer',windowsHide:true,timeout:30_000,maxBuffer:64*1024*1024})).stdout;
+    const git=async(...args)=>(await gitBytes(...args)).toString('utf8').trim();
     if(await git('rev-parse','--is-shallow-repository')!=='false')fail('full source history required');
     await git('merge-base','--is-ancestor',adoption.sourceSha,defaultHead);
-    const file=async(commit,path)=>{
+    const fileBytes=async(commit,path)=>{
       if(!sha(commit)||typeof path!=='string'||path.startsWith('/')||/[\0\\:]/.test(path)||path.split('/').some(part=>!part||part==='.'||part==='..'))fail('source path');
       const entry=await git('ls-tree',commit,'--',path);
       if(!/^100644 blob [a-f0-9]{40}\t/.test(entry))fail('source file required');
-      return git('show',`${commit}:${path}`);
+      return gitBytes('show',`${commit}:${path}`);
     };
+    const file=async(commit,path)=>(await fileBytes(commit,path)).toString('utf8').trim();
     const settings=JSON.parse(await file(adoption.sourceSha,'release-please-config.json'));
     const manifest=JSON.parse(await file(adoption.sourceSha,'.release-please-manifest.json'));
     const delivery=parseDeliveryConfig(JSON.parse(await file(adoption.sourceSha,'.github/delivery.json')));
@@ -67,6 +69,9 @@ export async function withReleaseAdoption(request,adoption,io,operation) {
         const unitPath=path=>unit.path==='.'?path:`${unit.path}/${path}`;
         if(options['release-type']==='simple') {if(await file(S,unitPath(options['version-file']))!==target.version)fail('native VERSION');}
         else if(options['release-type']==='node') {if(JSON.parse(await file(S,unitPath('package.json'))).version!==target.version)fail('native package version');}
+        else if(options['release-type']==='python') {
+          await nativePythonSourceVersion(fileURLToPath(new URL('..',import.meta.url)),await fileBytes(S,unitPath('pyproject.toml')),target.version);
+        }
         else fail('native version adapter required');
       }
       return true;

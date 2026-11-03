@@ -13,11 +13,12 @@
     "test:pages": "npm --prefix candidate run test:pages",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.runtime.json --noEmit && node scripts/verify-source-boundaries.mjs",
     "verify:config": "node scripts/verify-config.mjs",
-    "verify:dist": "node scripts/verify-dist.mjs && node e08-python/build-native.mjs --verify",
+    "verify:dist": "node scripts/verify-dist.mjs && node e08-python/build-native.mjs --verify && npm run test:e08-python",
     "verify:workflows": "node scripts/verify-workflows.mjs",
     "verify": "npm run test && npm run typecheck && npm run verify:config && npm run verify:dist && npm run verify:workflows",
     "test:settings": "node --test tools/settings-sync/entry.test.cjs",
-    "test:template": "uv run --project tools/template --frozen python -m unittest discover -s tools/template -p test_*.py -v"
+    "test:template": "uv run --project tools/template --frozen python -m unittest discover -s tools/template -p test_*.py -v",
+    "test:e08-python": "uv sync --project tools/template --frozen --only-group release-inspection --inexact --no-build && node --test e08-python/legacy-state-fixture.test.mjs e08-python/release-worker.test.mjs && vitest run --config e08-python/vitest.config.mjs && vitest run packages/runner/test/e08-publication-binding.test.ts packages/runner/test/release-adoption.test.ts"
   },
   "dependencies": {
     "@octokit/auth-app": "8.3.1",

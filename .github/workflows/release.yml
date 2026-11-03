@@ -1,0 +1,62 @@
+name: E08 Python release acceptance
+on:
+  workflow_dispatch:
+    inputs:
+      adoption_pr:
+        description: Merged adoption PR in the fixed E08 Python product repository
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: e08-python-release
+  cancel-in-progress: false
+jobs:
+  release-coordinator:
+    if: github.repository == 'splrad/steward-e08-controller' && github.repository_id == '1440689456' && github.ref == 'refs/heads/e08-channel-trunk'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: steward-release
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d
+        env:
+          MISE_SAFE: '1'
+          MISE_NODE_COMPILE: 'false'
+        with:
+          version: 2026.10.24
+          install_args: --locked
+          cache: false
+          env: false
+          persist_github_token: false
+      - name: Activate trusted controller tool paths
+        shell: bash
+        env:
+          MISE_SAFE: '1'
+          MISE_LOCKED: '1'
+        run: mise bin-paths >> "$GITHUB_PATH"
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install locked native metadata reader
+        run: uv sync --project tools/template --frozen --only-group release-inspection --no-build
+      - name: Verify E08 bundle and prepare fixed fixture runtime
+        run: |
+          node e08-python/build-native.mjs --verify
+          node e08-python/prepare-runtime.mjs
+      - name: business-release-coordinator
+        env:
+          STEWARD_APP_PRIVATE_KEY: ${{ secrets.STEWARD_APP_PRIVATE_KEY }}
+          STEWARD_CENTRAL_TOKEN: ${{ github.token }}
+          E08_ADOPTION_PR: ${{ inputs.adoption_pr }}
+        run: node e08-python/release-worker.mjs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: e08-python-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: e08-results/release-wake.json
+          if-no-files-found: error
+          retention-days: 90
