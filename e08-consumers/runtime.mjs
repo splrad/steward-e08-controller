@@ -56,7 +56,8 @@ const repository={id:1440689606,full_name:'splrad/steward-e08-bootstrap',default
   if(mode==='bootstrap'){
     const bootstrap=await bind('scripts/repository-bootstrap.mjs',[
       ['splrad/steward','splrad/steward-e08-controller'],['1296724484','1440689456'],['4243096','5553347'],
-      ["'./release-record.mjs'","'"+record+"'"],["'./quality-language-summary.mjs'","'"+quality+"'"]]);
+      ["'./release-record.mjs'","'"+record+"'"],["'./quality-language-summary.mjs'","'"+quality+"'"],
+      ['return result;', 'return result.filter(r=>[1440689456,1440689534,1440689606].includes(r.id));']]);
     for(let pass=1;pass<=2;pass++){
       const counts=await (await import(bootstrap)).main(transport);
       evidence.results.push({pass,counts,sample:'Existing repository continuation; prior empty-repository windows retained'});
@@ -64,7 +65,10 @@ const repository={id:1440689606,full_name:'splrad/steward-e08-bootstrap',default
     }
   }else{
     const app=await (await import(auth)).nativeReleaseApp(env.STEWARD_APP_PRIVATE_KEY,transport);
-    const repositories=await app.discover();check(repositories.length===3&&repositories.some(r=>r.id===repository.id),'INSTALLATION_SCOPE');
+    // This consumer acceptance owns exactly the three public fixtures; discovery can include other authorized App repositories.
+    const publicFixtures=new Map([[1440689456,'splrad/steward-e08-controller'],[1440689534,'splrad/steward-e08-product'],[1440689606,'splrad/steward-e08-bootstrap']]);
+    const repositories=(await app.discover()).filter(r=>publicFixtures.has(r.id));
+    check(repositories.length===3&&new Set(repositories.map(r=>r.id)).size===3&&repositories.every(r=>publicFixtures.get(r.id)===r.full_name),'INSTALLATION_SCOPE');
     evidence.discovered=repositories.map(r=>({id:r.id,repository:r.full_name}));
     if(mode==='templates'){
       const {templateWake,deliverRepositoryTemplate}=await import(fileUrl('scripts/template-delivery.mjs'));
