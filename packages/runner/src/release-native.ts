@@ -17,8 +17,12 @@ export async function nativePythonSourceVersion(controllerDirectory:string,bytes
     const file=join(home,'pyproject.toml');await writeFile(file,bytes,{flag:'wx'});
     const python=resolve(controllerDirectory,'tools/template/.venv',process.platform==='win32'?'Scripts/python.exe':'bin/python');
     const result=await promisify(execFile)(python,['-I',resolve(controllerDirectory,'scripts/inspect-python-release.py'),'--source-version',file,releaseVersion],
-      {env:isolatedBuildEnvironment(process.env,home),cwd:home,timeout:nativeInspectionTimeoutMs,maxBuffer:64*1024,windowsHide:true,encoding:'utf8'});
-    const value=JSON.parse(result.stdout.trim());
+      {env:isolatedBuildEnvironment(process.env,home),cwd:home,timeout:nativeInspectionTimeoutMs,maxBuffer:64*1024,windowsHide:true,encoding:'utf8'}).catch(error => {
+        if (error.code === 2 && error.stdout?.trim() === '{"error":"RN_NATIVE_INVALID_ASSET"}') throw new BuildContractError('RN_BUILD_VERSION');
+        throw error;
+      });
+    let value: any;
+    try { value=JSON.parse(result.stdout.trim()); } catch { throw new BuildContractError('RN_BUILD_VERSION'); }
     if(!value||Object.keys(value).join(',')!=='version'||typeof value.version!=='string'||!value.version)throw new BuildContractError('RN_BUILD_VERSION');
     return value.version;
   } finally {await rm(home,{recursive:true,force:true});}

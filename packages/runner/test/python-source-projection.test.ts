@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { resolve } from 'node:path';
 import { permitOfflineScript } from './offline-fixtures.js';
+import { BuildContractError } from '../../core/src/build-manifest.js';
 import { nativePythonSourceVersion } from '../src/release-native.js';
 import { pipelineIdentity } from '../src/release-pipeline.js';
 import { nativeRequestIdentity } from '../src/native-release-evidence.js';
@@ -12,7 +13,7 @@ it.each([['1.0.0','1.0.0','1.0.0'],['1.0.0rc1','1.0.0-rc.1','1.0.0rc1'],['1.0.0-
   expect(await nativePythonSourceVersion(process.cwd(),Buffer.from(`[project]\nname="fixture"\nversion="${native}"\n`),rp)).toBe(expected);
 });
 it.each(['[project]\nversion="1.0.1"','[project]\nversion="1.0.0rc1"','[project]\ndynamic=["version"]','[project]\nversion="1.0.0"\ndynamic=["version"]','[project]\nversion="1.0.0-unknown"'])('rejects conflicting, dynamic or invalid Python metadata: %s',async content=>{
-  await expect(nativePythonSourceVersion(process.cwd(),Buffer.from(content),'1.0.0')).rejects.toThrow();
+  await expect(nativePythonSourceVersion(process.cwd(),Buffer.from(content),'1.0.0')).rejects.toBeInstanceOf(BuildContractError);
 });
 it.each(['python-stable','python-rc','python-no-lock','node','node-no-lock'])('build identity derives exact S versions and enabled-ecosystem locks: %s',async kind=>{
   const f=productPipelineFixture(),python=kind.startsWith('python'),version=kind==='python-rc'?'1.0.0-rc.1':'1.0.0',native=kind==='python-rc'?'1.0.0rc1':version;
