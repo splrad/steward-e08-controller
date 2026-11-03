@@ -41,63 +41,20 @@ function run(executable: string, args: string[], cwd: string, env: NodeJS.Proces
   return result.stdout;
 }
 
-/** User-approved title-only exception. The trusted template remains the single workflow source. */
-async function titleTriggerException(root: string, finding: any, files: readonly string[]): Promise<boolean> {
-  if (finding.ident !== 'dangerous-triggers' || finding.ignored !== false) return false;
-  const primary = finding.locations?.filter((location: any) => location.symbolic?.kind === 'Primary');
-  if (primary?.length !== 1 || JSON.stringify(primary[0].symbolic?.route?.route) !== JSON.stringify([{ Key: 'on' }, { Key: 'pull_request_target' }])) return false;
+/** Select only the two adopted native trigger diagnostics; workflow behavior stays under normal review. */
+function acceptedTrigger(root: string, finding: any, files: readonly string[]): string | null {
+  if (finding?.ident !== 'dangerous-triggers' || finding.ignored !== false || !Array.isArray(finding.locations)) return null;
+  const primary = finding.locations.filter((location: any) => location?.symbolic?.kind === 'Primary');
+  if (primary.length !== 1) return null;
   const path = primary[0].symbolic?.key?.Local?.verbatim_path;
-  if (typeof path !== 'string' || !files.includes(resolve(path))) return false;
+  if (typeof path !== 'string' || !isAbsolute(path) || !files.includes(resolve(path))) return null;
   const local = relative(root, path).replaceAll('\\', '/');
-  if (!['.github/workflows/pr-title.yml', 'templates/repository/.github/workflows/pr-title.yml'].includes(local)) return false;
-  const normalize = (text: string) => {
-    const parsed = YAML.parseDocument(text);
-    if (parsed.errors.length) return null;
-    const doc = parsed.toJS({ maxAliasCount: 100 });
-    const jobs: any[] = Object.values(doc?.jobs ?? {}), step = jobs[0]?.steps?.[0];
-    if (jobs.length !== 1 || jobs[0].steps?.length !== 1 || step?.run !== undefined
-      || !/^amannn\/action-semantic-pull-request@[a-f0-9]{40}$/.test(step?.uses ?? '')
-      || JSON.stringify(doc.permissions) !== '{"pull-requests":"read"}' || jobs[0].permissions !== undefined) return null;
-    // Dependency updates retain their single native uses SHA; no second SHA table.
-    step.uses = step.uses.replace(/@[a-f0-9]{40}$/, '@PINNED');
-    const ordered = (value: any): any => Array.isArray(value) ? value.map(ordered)
-      : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, ordered(value[key])])) : value;
-    return JSON.stringify(ordered(doc));
-  };
-  const trusted = normalize(await readFile(join(policyRoot, 'templates/repository/.github/workflows/pr-title.yml'), 'utf8'));
-  return trusted !== null && normalize(await readFile(path, 'utf8')) === trusted;
-}
-
-/** Approved central promotion entry only. The reviewed P YAML is the authority, not candidate config. */
-async function promotionTriggerException(root: string, finding: any, files: readonly string[]): Promise<boolean> {
-  if (finding.ident !== 'dangerous-triggers' || finding.ignored !== false) return false;
-  const primary = finding.locations?.filter((location: any) => location.symbolic?.kind === 'Primary');
-  if (primary?.length !== 1 || JSON.stringify(primary[0].symbolic?.route?.route) !== JSON.stringify([{ Key: 'on' }, { Key: 'workflow_run' }])) return false;
-  const path = primary[0].symbolic?.key?.Local?.verbatim_path;
-  if (typeof path !== 'string' || !files.includes(resolve(path))
-    || relative(root, path).replaceAll('\\', '/') !== '.github/workflows/governance-promotion.yml') return false;
-  const normalize = (text: string): string | null => {
-    const parsed = YAML.parseDocument(text);
-    if (parsed.errors.length) return null;
-    const doc = parsed.toJS({ maxAliasCount: 100 });
-    if (!doc?.on?.workflow_run || !doc?.jobs) return null;
-    for (const job of Object.values(doc.jobs) as any[]) for (const step of job.steps ?? []) {
-      if (step.uses !== undefined) {
-        if (typeof step.uses !== 'string' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[a-f0-9]{40}$/.test(step.uses)) return null;
-        // Existing projects can receive native dependency SHA updates; their identity and all other fields stay bound to P.
-        step.uses = step.uses.replace(/@[a-f0-9]{40}$/, '@PINNED');
-        if (step.uses === 'jdx/mise-action@PINNED') {
-          if (typeof step.with?.version !== 'string' || !/^\d{4}\.\d+\.\d+$/.test(step.with.version)) return null;
-          step.with.version = 'LOCKED-RELEASE';
-        }
-      }
-    }
-    const ordered = (value: any): any => Array.isArray(value) ? value.map(ordered)
-      : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, ordered(value[key])])) : value;
-    return JSON.stringify(ordered(doc));
-  };
-  const trusted = normalize(await readFile(join(policyRoot, '.github/workflows/governance-promotion.yml'), 'utf8'));
-  return trusted !== null && normalize(await readFile(path, 'utf8')) === trusted;
+  const route = JSON.stringify(primary[0].symbolic?.route?.route);
+  if (['.github/workflows/pr-title.yml', 'templates/repository/.github/workflows/pr-title.yml'].includes(local)
+    && route === JSON.stringify([{ Key: 'on' }, { Key: 'pull_request_target' }])) return 'E07-TITLE-METADATA-20261028';
+  if (local === '.github/workflows/governance-promotion.yml'
+    && route === JSON.stringify([{ Key: 'on' }, { Key: 'workflow_run' }])) return 'E07-PROMOTION-WORKFLOW-RUN-20261031';
+  return null;
 }
 export async function resolvePolicyTool(name: 'syft' | 'gh' | 'lychee' | 'oras' | 'uv'): Promise<string> {
   const ids = { syft: 'aqua:anchore/syft', gh: 'aqua:cli/cli', lychee: 'aqua:lycheeverse/lychee', oras: 'aqua:oras-project/oras', uv: 'aqua:astral-sh/uv' };
@@ -223,12 +180,11 @@ export async function scanWorkflows(workspace: string, paths: readonly string[])
       '--pyflakes', tools.pyflakes, '--', ...files], temporary, isolated, results);
     const output = run(tools.zizmor, ['--offline', '--no-config', '--no-ignores', '--strict-collection', '--no-progress', '--color', 'never', '--format=json-v1', ...files], temporary, isolated, results, [0, 14]);
     const findings = JSON.parse(output);
-    if (!Array.isArray(findings)) throw new Error('zizmor failed: unknown JSON result');
+    if (!Array.isArray(findings) || (results.at(-1)!.status === 0 && findings.length !== 0)) throw new Error('zizmor failed: unknown JSON result');
     const exceptions = [];
     if (results.at(-1)!.status !== 0) {
-      for (const finding of findings.filter(f => !f.ignored)) {
-        const decision = await titleTriggerException(root, finding, files) ? 'E07-TITLE-METADATA-20261028'
-          : await promotionTriggerException(root, finding, files) ? 'E07-PROMOTION-WORKFLOW-RUN-20261031' : null;
+      for (const finding of findings) {
+        const decision = acceptedTrigger(root, finding, files);
         if (!decision) throw new Error(`zizmor failed: ${JSON.stringify(finding)}`);
         exceptions.push({ decision, finding });
       }

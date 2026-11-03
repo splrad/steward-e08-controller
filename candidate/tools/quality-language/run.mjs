@@ -23,13 +23,11 @@ export async function qualityLanguage(mode, input, token, createClient = options
   try {
     await client.start();
     if (!(await client.getAuthStatus()).isAuthenticated) return { status:'WAIT_AUTH' };
-    const quota = await client.rpc.account.getQuota({});
-    const snapshots = Object.values(quota.quotaSnapshots).filter(q => q !== undefined);
-    if (!snapshots.length || snapshots.some(q => q.overageAllowedWithExhaustedQuota !== false
-      || q.isUnlimitedEntitlement !== true && (!Number.isFinite(q.remainingPercentage) || q.remainingPercentage <= 0))) return {status:'WAIT_QUOTA'};
+    // Actions requests are billed to the organization. Personal-seat quota snapshots
+    // are not an authorization or budget decision for this workflow token.
     const models = await client.rpc.models.list({});
     if (!models.models.length) return {status:'WAIT_QUOTA'};
-    if (mode === 'preflight') return {status:'READY', quota:quota.quotaSnapshots, models:models.models.map(m => m.id)};
+    if (mode === 'preflight') return {status:'READY', models:models.models.map(m => m.id)};
     session = await client.createSession(isolatedCopilotSessionOptions(directory, prompt));
     /** @type {{model:string|null,inputTokens:number,outputTokens:number}[]} */ const events = [];
     let capacity = false;

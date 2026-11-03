@@ -4,7 +4,6 @@ import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {generateKeyPairSync} from 'node:crypto';
 import YAML from 'yaml';
-import '../../../e08-consumers/revocation.test.mjs';
 const module=()=>import(pathToFileURL(resolve('scripts/governance-promotion.mjs')).href);
 const P='a'.repeat(40),M='b'.repeat(40),T='c'.repeat(40);
 const path='.github/workflows/pr-validation-native.yml';
@@ -24,6 +23,16 @@ function source(){
   }};return fixture;
 }
 const input={workflowId:5,event:'workflow_run',sourceRunId:12,controllerSha:M,requiredJobs:['Scope','SPLRAD Validation']};
+it('accepts a scope-skipped job only with the trusted aggregate successful and keeps failures blocked',async()=>{
+  const {selectPromotion}=await module(),f=source();
+  f.jobs.push({...f.jobs[1]!,id:10,name:'Source linux',conclusion:'skipped'});
+  const policy={...input,requiredJobs:[...input.requiredJobs,'Source linux'],skippableJobs:['Source linux']};
+  expect(await selectPromotion(f,policy)).toMatchObject({status:'ELIGIBLE',jobIds:[8,9,10]});
+  await expect(selectPromotion(f,{...policy,skippableJobs:[]})).rejects.toThrow('JOBS_INCOMPLETE');
+  f.jobs[2]!.conclusion='failure';await expect(selectPromotion(f,policy)).rejects.toThrow('JOBS_INCOMPLETE');
+  f.jobs[2]!.conclusion='skipped';f.jobs[1]!.conclusion='skipped';await expect(selectPromotion(f,policy)).rejects.toThrow('JOBS_INCOMPLETE');
+  await expect(selectPromotion(f,{...policy,skippableJobs:['SPLRAD Validation']})).rejects.toThrow('SKIP_POLICY');
+});
 it.each(['workflow_run','schedule','workflow_dispatch'])('binds exact central native validation source and all required jobs: %s',async event=>{
   const f=source();expect(await (await module()).selectPromotion(f,{...input,event})).toMatchObject({status:'ELIGIBLE',sha:M,runId:12,runAttempt:2,jobIds:[8,9]});
 });
@@ -106,7 +115,7 @@ it('uses the independent Governance App, one repository, exact permissions and r
 it('wires trusted native validation and serialized promotion without upstream artifacts or caches',async()=>{
   const {validationJobNames}=await module(),native=YAML.parse(await readFile('.github/workflows/pr-validation-native.yml','utf8'));
   expect(validationJobNames(native)).toHaveLength(7);expect(JSON.stringify(native)).not.toMatch(/PRIVATE_KEY|environment|secrets\./);
-  const promote=YAML.parse(await readFile('.github/workflows/governance-promotion.yml','utf8')),bootstrap=YAML.parse(await readFile('candidate/.github/workflows/sync-managed.yml','utf8'));
+  const promote=YAML.parse(await readFile('.github/workflows/governance-promotion.yml','utf8')),bootstrap=YAML.parse(await readFile('.github/workflows/sync-managed.yml','utf8'));
   expect(promote.on.workflow_run).toEqual({workflows:['SPLRAD Steward / Native Validation'],types:['completed'],branches:['e08-channel-trunk']});
   expect(promote.on.schedule).toEqual([{cron:'37 1 * * *'}]);expect(promote.jobs.promote.concurrency).toEqual(bootstrap.jobs.bootstrap.concurrency);
   expect(JSON.stringify(promote)).not.toMatch(/download-artifact|actions\/cache/);

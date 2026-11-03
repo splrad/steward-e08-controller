@@ -50,7 +50,8 @@ export function validationJobNames(document) {
 }
 
 /** A display name is never authority: the registered native ID and path must both match. */
-export async function selectPromotion(io,{workflowId,event,sourceRunId,controllerSha,requiredJobs}) {
+export async function selectPromotion(io,{workflowId,event,sourceRunId,controllerSha,requiredJobs,skippableJobs=[]}) {
+  check(Array.isArray(skippableJobs)&&skippableJobs.every(name=>requiredJobs.includes(name)&&name!=='SPLRAD Validation'),'SKIP_POLICY');
   check(positive(workflowId)&&sha(controllerSha)&&['workflow_run','schedule','workflow_dispatch'].includes(event),'ENTRY');
   const current=await get(io,`${repo}/commits/e08-channel-trunk`);check(sha(current.sha),'MAIN');
   if(current.sha!==controllerSha)return {status:'STALE'};
@@ -75,7 +76,9 @@ export async function selectPromotion(io,{workflowId,event,sourceRunId,controlle
     check(candidates.length>0&&candidates.every(j=>j.run_id===run.id&&j.head_sha===current.sha&&positive(j.run_attempt)&&j.run_attempt<=run.run_attempt),'JOBS_SOURCE');
     candidates.sort((a,b)=>b.run_attempt-a.run_attempt);
     check(candidates.filter(j=>j.run_attempt===candidates[0].run_attempt).length===1,'JOBS_AMBIGUOUS');
-    check(candidates[0].status==='completed'&&candidates[0].conclusion==='success','JOBS_INCOMPLETE');selected.push(candidates[0].id);
+    // The successful trusted aggregate has already checked which scope outputs require each conditional job.
+    check(candidates[0].status==='completed'&&(candidates[0].conclusion==='success'
+      ||skippableJobs.includes(name)&&candidates[0].conclusion==='skipped'),'JOBS_INCOMPLETE');selected.push(candidates[0].id);
   }
   const after=await get(io,`${repo}/actions/runs/${run.id}`);
   check(after.run_attempt===run.run_attempt&&after.status==='completed'&&after.conclusion==='success'
@@ -167,8 +170,9 @@ export async function verifyPromotionSource(env,transport=fetch) {
   check(env.GITHUB_REPOSITORY==='splrad/steward-e08-controller'&&env.GITHUB_REPOSITORY_ID==='1440689456'&&env.GITHUB_REF==='refs/heads/e08-channel-trunk'
     &&sha(env.STEWARD_CONTROLLER_SHA)&&positive(Number(env.GITHUB_RUN_ID)),'CENTRAL');
   const document=YAML.parse(await readFile(validationPath,'utf8')),requiredJobs=validationJobNames(document);
+  const skippableJobs=Object.entries(document.jobs).filter(([key,job])=>!['scope','summary'].includes(key)&&job.if).map(([,job])=>job.name);
   return selectPromotion(promotionIO(env.GITHUB_TOKEN,transport),{workflowId:Number(env.NATIVE_VALIDATION_WORKFLOW_ID),event:env.GITHUB_EVENT_NAME,
-    sourceRunId:Number(env.SOURCE_VALIDATION_RUN_ID),controllerSha:env.STEWARD_CONTROLLER_SHA,requiredJobs});
+    sourceRunId:Number(env.SOURCE_VALIDATION_RUN_ID),controllerSha:env.STEWARD_CONTROLLER_SHA,requiredJobs,skippableJobs});
 }
 export async function preflight(env=process.env,transport=fetch) {
   check(!env.GOVERNANCE_APP_PRIVATE_KEY,'PREFLIGHT_PRIVILEGE');

@@ -3,10 +3,15 @@ import {pathToFileURL} from 'node:url';
 import {resolve} from 'node:path';
 export function validationSummary(needs) {
   const keys=['scope','source-linux','source-windows','governance','dependency','docs'];
-  if(!needs||Object.keys(needs).length!==keys.length||keys.some(k=>needs[k]?.result!=='success'))throw Error('VALIDATION_REQUIRED_JOB_INCOMPLETE');
+  if(!needs||Object.keys(needs).length!==keys.length||keys.some(k=>!needs[k])||needs.scope.result!=='success')throw Error('VALIDATION_REQUIRED_JOB_INCOMPLETE');
   const outputs=needs.scope.outputs;
   if(!outputs||['source','dependency','docs','governance'].some(k=>!['true','false'].includes(outputs[k])))throw Error('VALIDATION_SCOPE_MISSING');
-  return keys.map(k=>`${k}: success`).join('\n');
+  for(const key of keys.slice(1)){
+    const group=key.startsWith('source-')?'source':key;
+    const expected=outputs[group]==='true'?'success':'skipped';
+    if(needs[key].result!==expected)throw Error('VALIDATION_REQUIRED_JOB_INCOMPLETE');
+  }
+  return keys.map(k=>`${k}: ${needs[k].result}`).join('\n');
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
   try{const text=validationSummary(JSON.parse(process.env.VALIDATION_NEEDS));

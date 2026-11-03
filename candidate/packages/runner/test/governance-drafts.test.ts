@@ -44,8 +44,8 @@ it.each([
   ['ambiguous PR rules',(s:any)=>s.base.rules.push({type:'pull_request',parameters:{}})],
   ['conflicting check writer',(s:any)=>s.base.rules[2].parameters.required_status_checks.push({context:'SPLRAD Validation',integration_id:5})],
 ])('rejects unverified inputs: %s',async(_name,mutate)=>{const {prepareGovernance}=await module(),s=snapshot();(mutate as any)(s);expect(()=>prepareGovernance(s)).toThrow();});
-it('splits creation/update actors from immutable and history constraints for all eight runtime roles',async()=>{
-  const {prepareGovernance}=await module(),d=prepareGovernance(snapshot());expect(d.runtime).toHaveLength(8);
+it('consolidates equal runtime constraints into five rules while preserving their exact scopes and actors',async()=>{
+  const {prepareGovernance}=await module(),d=prepareGovernance(snapshot());expect(d.runtime).toHaveLength(5);
   const named=(name:string)=>d.runtime.find((r:any)=>r.name===name);
   for(const r of d.runtime) {
     expect(r.conditions.repository_name).toEqual({include:['~ALL'],exclude:[],protected:false});
@@ -54,7 +54,51 @@ it('splits creation/update actors from immutable and history constraints for all
   }
   expect(named('steward-build-immutable').rules).toEqual([{type:'update',parameters:{update_allows_fetch_and_merge:false}},{type:'deletion'}]);
   expect(named('steward-governance-writer').bypass_actors.map((a:any)=>a.actor_id)).toEqual([4243096,92]);
-  expect(named('steward-pr-integrity').conditions.ref_name.include).toEqual(['refs/heads/steward/managed-sync','refs/heads/steward/release-candidate']);
+  expect(named('steward-ref-creator').conditions.ref_name.include).toEqual(['refs/heads/steward/build/*','refs/heads/steward/managed-sync','refs/heads/steward/release-candidate']);
+  expect(named('steward-ref-integrity').conditions.ref_name.include).toEqual(['refs/heads/steward/release-state','refs/heads/steward/automation-health','refs/heads/steward/governance-state','refs/heads/steward/managed-sync','refs/heads/steward/release-candidate']);
+});
+// This finite configuration comparison checks the request bodies, not GitHub enforcement.
+it.each([
+  ['steward/release-state',[4243096],[4243096]],
+  ['steward/automation-health',[4243096],[4243096]],
+  ['steward/governance-state',[4243096,92],[4243096,92]],
+  ['steward/managed-sync',[4243096],[4243096,92,7,8]],
+  ['steward/release-candidate',[4243096],[4243096,92,7,8]],
+  ['steward/build/cycle-1',[4243096],[]],
+])('keeps per-actor create/update/force/delete constraints for %s',async(branch,creators,writers)=>{
+  const {prepareGovernance}=await module(),{runtime}=prepareGovernance(snapshot());
+  const ref=`refs/heads/${branch}`;
+  const applicable=runtime.filter((r:any)=>r.conditions.ref_name.include.some((pattern:string)=>pattern.endsWith('/*')?ref.startsWith(pattern.slice(0,-1)):ref===pattern));
+  const allowed=(operation:string,actorId:number)=>!applicable.some((r:any)=>r.rules.some((entry:any)=>entry.type===operation)
+    && !r.bypass_actors.some((entry:any)=>entry.actor_type==='Integration'&&entry.actor_id===actorId&&entry.bypass_mode==='always'));
+  for(const actorId of [4243096,92,7,8]) {
+    expect(allowed('creation',actorId)).toBe((creators as number[]).includes(actorId));
+    expect(allowed('update',actorId)).toBe((writers as number[]).includes(actorId));
+    expect(allowed('deletion',actorId)).toBe(false);
+    // Build refs reject every update, including non-fast-forward writes.
+    expect(allowed('update',actorId)&&allowed('non_fast_forward',actorId)).toBe(false);
+  }
+});
+it('keeps runtime constraints off default and unrelated branches',async()=>{
+  const {prepareGovernance}=await module(),{runtime}=prepareGovernance(snapshot());
+  for(const branch of ['main','feature/next','steward/build-other','steward/governance-state-other'])
+    expect(runtime.some((r:any)=>r.conditions.ref_name.include.some((p:string)=>p.endsWith('/*')?`refs/heads/${branch}`.startsWith(p.slice(0,-1)):p===`refs/heads/${branch}`))).toBe(false);
+});
+it.each(['steward/release-state','steward/automation-health','steward/build/cycle-1'])('connects consolidated request bodies to the actual writer protection reader: %s',async branch=>{
+  const {prepareGovernance}=await module();
+  const {assertReleaseWriterProtection}=await import(pathToFileURL(resolve('scripts/release-record.mjs')).href);
+  const all=prepareGovernance(snapshot()).runtime.map((rule:any,index:number)=>({...rule,id:700+index,name:`observed-${index}`}));
+  const relevant=all.filter((r:any)=>r.conditions.ref_name.include.some((p:string)=>p.endsWith('/*')?`refs/heads/${branch}`.startsWith(p.slice(0,-1)):p===`refs/heads/${branch}`));
+  const io={request:async(method:string,path:string)=>{
+    expect(method).toBe('GET');
+    const value=path.includes('/rules/branches/')?relevant.flatMap((r:any)=>r.rules.map((rule:any)=>({...rule,ruleset_id:r.id}))):all.find((r:any)=>path.endsWith(`/rulesets/${r.id}`));
+    if(!value)throw Error('unexpected protection read '+path);
+    return {status:200,headers:new Headers(),bytes:Buffer.from(JSON.stringify(value))};
+  }};
+  await expect(assertReleaseWriterProtection('example/product',branch,io)).resolves.toBeUndefined();
+  const immutable=relevant.find((r:any)=>r.rules.some((rule:any)=>rule.type==='deletion'));
+  immutable.bypass_actors=[{actor_type:'Integration',actor_id:4243096,bypass_mode:'always'}];
+  await expect(assertReleaseWriterProtection('example/product',branch,io)).rejects.toThrow('writer integrity bypass');
 });
 it('scopes observed legacy branches to the exact native repository and rejects glob/path expansion',async()=>{
   const {prepareGovernance}=await module(),s=snapshot();s.legacyCandidates=[{repositoryId:15,branch:'release-please--branches--main'}];

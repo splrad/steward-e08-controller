@@ -71,13 +71,10 @@ export function prepareGovernance(snapshot) {
   const pr = ['refs/heads/steward/managed-sync', 'refs/heads/steward/release-candidate'];
   const runtime = [
     nativeRule('steward-state-writer', state, ['creation', 'update'], [actor(4243096)]),
-    nativeRule('steward-state-integrity', state, ['non_fast_forward', 'deletion'], []),
     nativeRule('steward-governance-writer', governance, ['creation', 'update'], [actor(4243096), actor(governanceApp.id)]),
-    nativeRule('steward-governance-integrity', governance, ['non_fast_forward', 'deletion'], []),
-    nativeRule('steward-build-creator', build, ['creation'], [actor(4243096)]),
+    nativeRule('steward-ref-creator', [...build, ...pr], ['creation'], [actor(4243096)]),
+    nativeRule('steward-ref-integrity', [...state, ...governance, ...pr], ['non_fast_forward', 'deletion'], []),
     nativeRule('steward-build-immutable', build, ['update', 'deletion'], []),
-    nativeRule('steward-pr-creator', pr, ['creation'], [actor(4243096)]),
-    nativeRule('steward-pr-integrity', pr, ['non_fast_forward', 'deletion'], []),
   ];
   const legacy = []; const seen = new Set();
   for (const item of legacyCandidates) {
