@@ -2,9 +2,9 @@ import { readFile, realpath } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { resolve, relative, isAbsolute } from 'node:path';
 
-export async function verifyToolchain(root = process.cwd()) {
+export async function verifyToolchain(root = process.cwd(), runtimeRoot = root) {
   const result = spawnSync('mise', ['ls', '--current', '--json'], {
-    cwd: root, shell: false, encoding: 'utf8', windowsHide: true, timeout: 30_000,
+    cwd: runtimeRoot, shell: false, encoding: 'utf8', windowsHide: true, timeout: 30_000,
     env: { ...process.env, MISE_SAFE: '1', MISE_LOCKED: '1', MISE_NODE_COMPILE: 'false' },
   });
   if (result.error || result.status !== 0) throw new Error('mise locked tool inventory is unavailable');
@@ -14,7 +14,7 @@ export async function verifyToolchain(root = process.cwd()) {
     'aqua:lycheeverse/lychee', 'aqua:oras-project/oras', 'aqua:anchore/syft']) {
     const entries = inventory[tool];
     if (!Array.isArray(entries) || entries.length !== 1 || !entries[0].installed || !entries[0].active
-      || resolve(entries[0].source?.path ?? '') !== resolve(root, 'mise.toml')) {
+      || resolve(entries[0].source?.path ?? '') !== resolve(runtimeRoot, 'mise.toml')) {
       throw new Error(`missing locked tool: ${tool}`);
     }
   }
