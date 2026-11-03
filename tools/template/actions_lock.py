@@ -59,9 +59,9 @@ def document(raw):
     return value
 
 
-def check_graph(lock):
-    """Every generated entry must be reachable from a workflow, including composite edges."""
-    pending = [key for roots in lock['workflows'].values() for key in roots]
+def reachable(lock, roots):
+    """Follow recorded composite edges without synthesizing or rewriting entries."""
+    pending = list(roots)
     reached = set()
     while pending:
         key = pending.pop()
@@ -70,7 +70,12 @@ def check_graph(lock):
         require(key in lock['dependencies'], 'DEPENDENCY_MISSING')
         reached.add(key)
         pending.extend(lock['dependencies'][key].get('uses', []))
-    require(reached == set(lock['dependencies']), 'UNREACHABLE_DEPENDENCY')
+    return reached
+
+
+def check_graph(lock):
+    roots = [key for values in lock['workflows'].values() for key in values]
+    require(reachable(lock, roots) == set(lock['dependencies']), 'UNREACHABLE_DEPENDENCY')
 
 
 def check_rewrite(original, generated, dependencies, path=()):
@@ -121,7 +126,9 @@ def check_delta(before, after, changed, before_files, after_files):
     old, new = before['workflows'], after['workflows']
     for path in old.keys() | new.keys():
         require(path in changed or old.get(path) == new.get(path), 'UNRELATED_WORKFLOW')
-    allowed = {key for path in changed for key in old.get(path, []) + new.get(path, [])}
+    old_closure = {path: reachable(before, roots) for path, roots in old.items()}
+    new_closure = {path: reachable(after, roots) for path, roots in new.items()}
+    allowed = {key for path in changed for key in old_closure.get(path, set()) | new_closure.get(path, set())}
     identities = {}
     for lock in [before, after]:
         for key, entry in lock['dependencies'].items():
@@ -131,9 +138,9 @@ def check_delta(before, after, changed, before_files, after_files):
             identities[repository] = identity
     for key in before['dependencies'].keys() | after['dependencies'].keys():
         first, second = before['dependencies'].get(key), after['dependencies'].get(key)
-        if first == second or (key in allowed and (first is None or second is None)):
+        consumers = {p for p in old.keys() | new.keys() if key in old_closure.get(p, set()) | new_closure.get(p, set())}
+        if first == second or (key in allowed and consumers <= changed and (first is None or second is None)):
             continue
-        consumers = {p for p in old.keys() | new.keys() if key in old.get(p, []) + new.get(p, [])}
         action = key.rsplit('@', 1)[0]
         require(first is not None and second is not None and consumers <= changed
                 and {k: v for k, v in first.items() if k != 'commit'} == {k: v for k, v in second.items() if k != 'commit'}
@@ -208,7 +215,7 @@ class OfficialTool:
             version = self.command(['actions-lock', '--version'], self.profile, self.env).decode().strip()
             require(version == 'actions-lock version ' + self.version, 'TOOL_VERSION_MISMATCH')
             self.installed = True
-        output = self.command(['actions-lock', *(['--verify'] if mode == 'verify' else []), '--no-interactive', '--json'],
+        output = self.command(['actions-lock', *(['--verify'] if mode == 'verify' else ['--no-narrow']), '--no-interactive', '--json'],
                               target, {**self.env, 'GH_ACTIONS_LOCK_REPO_ROOT': str(Path(target).resolve())})
         try:
             value = json.loads(output)

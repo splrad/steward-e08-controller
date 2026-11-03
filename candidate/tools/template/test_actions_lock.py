@@ -148,6 +148,54 @@ class LockTests(unittest.TestCase):
         with self.assertRaisesRegex(lock.LockFailure, 'DEPENDENCY_MISSING'):
             lock.prepare(self.root, existing, tool)
 
+    def test_composite_transitive_add_upgrade_delete_and_shared_preservation(self):
+        manual = self.path.parent / 'manual.yml'
+        manual.write_text(YAML, encoding='utf-8')
+        def composite_tool(mode, target):
+            value = fixture_document(target)
+            for key, entry in list(value['dependencies'].items()):
+                if key.startswith('example/composite@'):
+                    child = 'shared/action@' + entry['ref']
+                    entry['uses'] = [child]
+                    value['dependencies'][child] = {**entry, 'uses': [], 'owner_id': 7, 'repo_id': 9}
+            if mode == 'generate': self.save_lock(value)
+            else: self.assertEqual(lock.document((target / lock.LOCK).read_bytes()), value)
+        composite_tool('generate', self.root)
+        before = bridge.paths_in_tree(self.root)
+        self.path.write_text(YAML.replace('actions/checkout', 'example/composite').replace(SHA, 'b' * 40), encoding='utf-8')
+        self.assertEqual(lock.prepare(self.root, before, composite_tool)['status'], 'VERIFIED')
+        adopted = bridge.paths_in_tree(self.root)
+        self.path.write_text(YAML.replace('actions/checkout', 'example/composite').replace(SHA, 'c' * 40), encoding='utf-8')
+        self.assertEqual(lock.prepare(self.root, adopted, composite_tool)['status'], 'VERIFIED')
+        previous = bridge.paths_in_tree(self.root)
+        manual.write_bytes(self.path.read_bytes())
+        composite_tool('generate', self.root)
+        shared = bridge.paths_in_tree(self.root)
+        self.path.unlink()
+        self.assertEqual(lock.prepare(self.root, shared, composite_tool)['status'], 'VERIFIED')
+        after = lock.document((self.root / lock.LOCK).read_bytes())
+        self.assertEqual(after['dependencies'], lock.document(shared[lock.LOCK])['dependencies'])
+        only_manual = bridge.paths_in_tree(self.root)
+        manual.unlink()
+        self.assertEqual(lock.prepare(self.root, only_manual, composite_tool)['status'], 'VERIFIED')
+        self.assertEqual(lock.document((self.root / lock.LOCK).read_bytes())['dependencies'], {})
+        self.assertNotEqual(previous, adopted)
+
+    def test_unchanged_workflow_transitive_consumer_blocks_refresh(self):
+        manual = self.path.parent / 'manual.yml'
+        manual.write_text(YAML, encoding='utf-8')
+        value = fixture_document(self.root)
+        root = next(iter(value['dependencies']))
+        child = 'shared/action@v1'
+        value['dependencies'][root]['uses'] = [child]
+        value['dependencies'][child] = {'ref':'v1','commit':'sha1-' + 'b' * 40,'owner_id':7,'repo_id':9}
+        self.save_lock(value)
+        before = bridge.paths_in_tree(self.root)
+        self.path.write_text(YAML.replace('echo unchanged','echo modified'),encoding='utf-8')
+        value['dependencies'][child]['commit'] = 'sha1-' + 'c' * 40
+        with self.assertRaisesRegex(lock.LockFailure,'UNRELATED_DEPENDENCY'):
+            lock.prepare(self.root,before,lambda mode,target:self.save_lock(value))
+
     def test_explicit_managed_pin_update_under_same_ref_preserves_unaffected_shared_entries(self):
         def branch_tool(mode, target):
             value = fixture_document(target)
@@ -241,7 +289,7 @@ class LockTests(unittest.TestCase):
         tool.command = command
         tool('generate', self.root); tool('verify', self.root)
         self.assertEqual(calls[0], (['extension', 'install', 'github/gh-actions-lock', '--pin', 'v0.4.0'], profile))
-        self.assertEqual(calls[2][0], ['actions-lock', '--no-interactive', '--json'])
+        self.assertEqual(calls[2][0], ['actions-lock', '--no-narrow', '--no-interactive', '--json'])
         self.assertEqual(calls[3][0], ['actions-lock', '--verify', '--no-interactive', '--json'])
         for raw in [b'{"valid":false}', b'{}', b'unknown']:
             tool.command = lambda *args, raw=raw: raw
