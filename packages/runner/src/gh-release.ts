@@ -273,13 +273,13 @@ export class NativeGitHubRelease {
     if ((await this.read(target)).body !== notes) {
       await guard();
       let editError: unknown;
-      try { await this.mutate('PATCH', `repos/${target.manifest.fullName}/releases/${target.releaseId}`, { body: notes }); }
+      try { await this.mutate('PATCH', `repos/${target.manifest.fullName}/releases/${target.releaseId}`, { tag_name: target.manifest.tag, body: notes }); }
       catch (error) { editError = error; }
       if ((await this.read(target)).body !== notes) { if (editError) throw editError; reject('body edit not observed'); }
     }
     await guard();
     let publishError: unknown;
-    try { await this.mutate('PATCH', `repos/${target.manifest.fullName}/releases/${target.releaseId}`, { draft: false }); }
+    try { await this.mutate('PATCH', `repos/${target.manifest.fullName}/releases/${target.releaseId}`, { tag_name: target.manifest.tag, draft: false }); }
     catch (error) { publishError = error; }
     if ((await this.read(target)).draft) { if (publishError) throw publishError; reject('publication not observed'); }
     return this.verify(target);

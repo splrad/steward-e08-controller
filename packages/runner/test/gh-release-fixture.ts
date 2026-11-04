@@ -64,9 +64,11 @@ export async function ghReleaseFixture(sourceShaOverride?:string) {
         if (state.loseUpload) throw new Error('lost upload response'); return '{}';
       }
       if (method === 'PATCH') {
+        // Match GitHub REST: omitting tag_name removes the draft's current tag association.
+        release.tag_name = body.tag_name ?? 'untagged-fixture';
         expect(endpoint).toBe('repos/fixture/product/releases/20');
         if (body.body !== undefined) { release.body = body.body; if (state.loseBody) throw new Error('lost body response'); }
-        if (body.draft === false) { expect(Object.keys(body)).toEqual(['draft']); release.draft = false; release.immutable = true; if (state.losePublish) throw new Error('lost publish response'); }
+        if (body.draft === false) { expect(Object.keys(body)).toEqual(['tag_name', 'draft']); release.draft = false; release.immutable = true; if (state.losePublish) throw new Error('lost publish response'); }
         return '{}';
       }
       if (method === 'DELETE') {
