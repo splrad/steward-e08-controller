@@ -5,9 +5,8 @@ export const maintenanceWorkflows = ['sync-managed.yml','settings-sync.yml','upd
 export type MaintenanceWorkflow = typeof maintenanceWorkflows[number];
 export function maintenanceJobKeys(file: MaintenanceWorkflow): readonly string[] {
   switch(file) {
-    case 'sync-managed.yml': return ['bootstrap','templates','automation-health'];
+    case 'sync-managed.yml': return ['bootstrap','templates'];
     case 'settings-sync.yml': return ['settings-sync'];
-    // Retain historical health-only attempts when reading an older dependency Run.
     case 'update-dependencies.yml': return ['targets','update','automation-health'];
     case 'quality-language-summary.yml': return ['quality-summary'];
     case 'governance-promotion.yml': return ['promote'];
