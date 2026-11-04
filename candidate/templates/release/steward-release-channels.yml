@@ -58,6 +58,9 @@ jobs:
           ref: d89aaffa0d0f22e1f8c4d5d160b43da4c7e3262e
           path: controller
           persist-credentials: false
+      - name: Enable Git long paths
+        shell: pwsh
+        run: git config --global core.longpaths true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: steward/release-state
@@ -105,6 +108,9 @@ jobs:
           ref: d89aaffa0d0f22e1f8c4d5d160b43da4c7e3262e
           path: controller
           persist-credentials: false
+      - name: Enable Git long paths
+        shell: pwsh
+        run: git config --global core.longpaths true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: steward/release-state
@@ -175,6 +181,9 @@ jobs:
           ref: d89aaffa0d0f22e1f8c4d5d160b43da4c7e3262e
           path: controller
           persist-credentials: false
+      - name: Enable Git long paths
+        shell: pwsh
+        run: git config --global core.longpaths true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: steward/release-state
@@ -310,6 +319,9 @@ jobs:
           ref: d89aaffa0d0f22e1f8c4d5d160b43da4c7e3262e
           path: controller
           persist-credentials: false
+      - name: Enable Git long paths
+        shell: pwsh
+        run: git config --global core.longpaths true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: steward/release-state
@@ -456,6 +468,9 @@ jobs:
           ref: d89aaffa0d0f22e1f8c4d5d160b43da4c7e3262e
           path: controller
           persist-credentials: false
+      - name: Enable Git long paths
+        shell: pwsh
+        run: git config --global core.longpaths true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: steward/release-state
@@ -616,6 +631,9 @@ jobs:
           ref: d89aaffa0d0f22e1f8c4d5d160b43da4c7e3262e
           path: controller
           persist-credentials: false
+      - name: Enable Git long paths
+        shell: pwsh
+        run: git config --global core.longpaths true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: steward/release-state
@@ -981,6 +999,9 @@ jobs:
           ref: d89aaffa0d0f22e1f8c4d5d160b43da4c7e3262e
           path: controller
           persist-credentials: false
+      - name: Enable Git long paths
+        shell: pwsh
+        run: git config --global core.longpaths true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: steward/release-state
@@ -1136,6 +1157,9 @@ jobs:
           ref: d89aaffa0d0f22e1f8c4d5d160b43da4c7e3262e
           path: controller
           persist-credentials: false
+      - name: Enable Git long paths
+        shell: pwsh
+        run: git config --global core.longpaths true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: steward/release-state
