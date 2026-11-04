@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { deflateSync } from 'node:zlib';
+import { ManifestPlugin } from 'release-please/build/src/plugin.js';
 import { Manifest } from 'release-please/build/src/manifest.js';
 import { buildStrategy } from 'release-please/build/src/factory.js';
 import type { Scm } from 'release-please/build/src/scm.js';
@@ -45,7 +46,17 @@ export async function generateCandidate(B: string, rpConfig: CandidateGenerator)
     || before.boundaries.some(b => !b.found || b.kind !== 'full-tree' && (!b.sha || !b.reference))) throw new Error('CANDIDATE_HISTORY_UNVERIFIED');
   const config = JSON.parse(before.config) as Record<string, unknown>;
   if (config['separate-pull-requests'] !== false) throw new Error('CANDIDATE_SINGLE_PR_REQUIRED');
-  const github = readOnlyReleasePlease(await rpConfig.createReadClient());
+  const client = readOnlyReleasePlease(await rpConfig.createReadClient());
+  const baselineCommits = new Map<string, number>();
+  const baselines = before.boundaries.filter(boundary => boundary.kind === 'baseline');
+  const github = baselines.length ? new Proxy(client, { get(target, key, receiver) {
+    if (key === 'mergeCommitIterator') return async function* (...args: Parameters<Scm['mergeCommitIterator']>) {
+      for await (const commit of target.mergeCommitIterator(...args)) {
+        baselineCommits.set(commit.sha, baselineCommits.size); yield commit;
+      }
+    };
+    return Reflect.get(target, key, receiver);
+  } }) : client;
   const previousManifest = JSON.parse(before.manifest) as Record<string, string>;
   const firstLayerScape = github.repository.owner === 'splrad' && github.repository.repo === 'LayerScape'
     && (!Object.hasOwn(previousManifest, '.') || previousManifest['.'] === '0.0.0'
@@ -56,12 +67,29 @@ export async function generateCandidate(B: string, rpConfig: CandidateGenerator)
       || Object.hasOwn((config.packages as Record<string, Record<string, unknown>>)?.['.'] ?? {}, key))
     || before.boundaries.some(boundary => boundary.kind !== 'full-tree'))) throw new Error('CANDIDATE_FIRST_RELEASE_INPUT');
   if (github.repository.defaultBranch !== before.defaultBranch) throw new Error('CANDIDATE_DEFAULT_BRANCH_DRIFT');
-  const baseline = before.boundaries.every(b => b.kind === 'baseline' && b.sha === before.boundaries[0]?.sha) ? before.boundaries[0]?.sha : null;
   const manifest = await Manifest.fromManifest(github, before.defaultBranch, rpConfig.configPath, rpConfig.manifestPath,
-    { releaseSearchDepth: before.releases.length + 1, commitSearchDepth: before.commitCount + 1, separatePullRequests: false, ...(baseline ? { bootstrapSha: baseline } : {}) });
+    { releaseSearchDepth: before.releases.length + 1, commitSearchDepth: before.commitCount + 1, separatePullRequests: false });
   const paths = Object.keys(manifest.repositoryConfig).sort();
   if (JSON.stringify(paths) !== JSON.stringify(rpConfig.units.map(u => u.path).sort())
     || JSON.stringify(paths) !== JSON.stringify(before.boundaries.map(b => b.path).sort())) throw new Error('CANDIDATE_UNIT_COVERAGE');
+  // RP owns path splitting, version strategies, workspace propagation and PR merging.
+  // Apply each verified baseline before those strategies; a global bootstrap SHA
+  // would truncate other units or replay already released commits.
+  if (baselines.length) manifest.plugins.unshift(new class extends ManifestPlugin {
+    override async preconfigure(...args: Parameters<ManifestPlugin['preconfigure']>) {
+      const [strategies, commitsByPath] = args;
+      for (const boundary of baselines) {
+        const end = baselineCommits.get(boundary.sha!);
+        if (end === undefined) throw new Error('CANDIDATE_BASELINE_NOT_REACHED');
+        commitsByPath[boundary.path] = (commitsByPath[boundary.path] ?? []).filter(commit => {
+          const index = baselineCommits.get(commit.sha);
+          if (index === undefined) throw new Error('CANDIDATE_BASELINE_COMMIT_UNKNOWN');
+          return index < end;
+        });
+      }
+      return strategies;
+    }
+  }(github, before.defaultBranch, manifest.repositoryConfig));
   const candidates = await manifest.buildPullRequests();
   if (candidates.length > 1) throw new Error('CANDIDATE_MULTIPLE_PRS');
   const candidate = candidates[0];

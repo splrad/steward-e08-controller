@@ -248,7 +248,9 @@ export async function nativeReleaseCandidate(request, { token, readToken, copilo
         if (!work) {
           const collected = await collectContentInput({ directory: join(root, 'source'), candidateId: candidate.id, configDigest: snapshot.configDigest,
             repository: request.repository, preparedChanges: snapshot.files,
-            units: snapshot.units.map(unit => { const b = lastFacts.boundaries.find(b => b.path === unit.path); return { workspace: request.directory,
+            units: snapshot.units.map(unit => { const b = lastFacts.boundaries.find(b => b.path === unit.path);
+              const settings = JSON.parse(lastFacts.config), options = { ...settings, ...settings.packages[unit.path] };
+              return { workspace: request.directory, changelogPath: options['changelog-path'] ?? 'CHANGELOG.md',
               identity: { repositoryId: request.repositoryId, defaultBranch: request.defaultBranch, targetSha: snapshot.baseSha, controllerSha }, unit,
               contextPaths: [...new Set(['README.md', '.github/delivery.json', (unit.path === '.' ? '' : unit.path + '/') + 'README.md', (unit.path === '.' ? '' : unit.path + '/') + 'package.json'])].filter(path => paths.has(path)),
               boundary: b.kind === 'full-tree' ? { kind: 'full-tree' } : { kind: b.kind, sha: b.sha, reference: b.reference, version: JSON.parse(lastFacts.manifest)[unit.path] } }; }) });

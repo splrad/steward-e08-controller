@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GitReleaseInputOptions } from './release-git-input.js';
+import { assertDeliveryPath } from '../../core/src/delivery-config.js';
 import { committedVersionNotes } from '../../core/src/release-template.js';
 import { isolatedBuildEnvironment } from './build-environment.js';
 import { CONTENT_PROMPT, validateContentResult, validateContentInput, renderUnitContent, utf8Length,
@@ -22,7 +23,7 @@ export type ContentCache = Record<string, ContentCacheEntry>;
 export function contentWireInput(payload: ContentPayload) { return JSON.stringify({ prompt: CONTENT_PROMPT, ...payload }); }
 
 /** Read curated release changes and product context, not a model-coverage copy of every source blob. */
-export async function collectContentInput(options: { directory: string; candidateId: string; configDigest: string; units: GitReleaseInputOptions[];
+export async function collectContentInput(options: { directory: string; candidateId: string; configDigest: string; units: (GitReleaseInputOptions & { changelogPath?: string })[];
   allUnits?: { id: string; path: string }[]; dependencies?: Record<string, string[]>;
   repository?: string; preparedChanges?: { path: string; content: string | null }[]; sourcePaths?: string[] }) {
   if (!options.units.length) throw new Error('CONTENT_UNITS_REQUIRED');
@@ -37,8 +38,9 @@ export async function collectContentInput(options: { directory: string; candidat
         windowsHide: true, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
       const range = unit.boundary.kind === 'full-tree' ? unit.identity.targetSha : `${unit.boundary.sha}..${unit.identity.targetSha}`;
       const commits = git('log', '--format=%H', range).trim().split('\n').filter(Boolean).map(sha => ({ sha }));
-      const entries: {path:string; text:string; stage:'CONTEXT'|'DIFF'}[] = (options.preparedChanges ?? []).filter(f => /(?:^|\/)CHANGELOG\.md$/i.test(f.path)
-          && (unit.unit.path === '.' || f.path.startsWith(unit.unit.path + '/')))
+      const changelog = unit.changelogPath ?? 'CHANGELOG.md'; assertDeliveryPath(changelog);
+      const changelogPath = (unit.unit.path === '.' ? '' : unit.unit.path + '/') + changelog;
+      const entries: {path:string; text:string; stage:'CONTEXT'|'DIFF'}[] = (options.preparedChanges ?? []).filter(f => f.path === changelogPath)
           .map(f => ({ path: f.path, text: f.content ? committedVersionNotes(f.content, unit.unit.version, options.repository ?? (() => { throw new Error('CONTENT_REPOSITORY_REQUIRED'); })(), unit.identity.targetSha, unit.unit.tag).changelog : '', stage: 'DIFF' as const }));
       for (const path of [...new Set([...(unit.contextPaths ?? []), ...(options.sourcePaths ?? [])])]) {
         if (path.startsWith('/') || path.split(/[\\/]/).includes('..') || /[\0\r\n]/.test(path)) throw new Error('CONTENT_SOURCE_PATH');

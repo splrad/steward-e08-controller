@@ -49,7 +49,7 @@ it.each(['old-source', 'new-source', 'missing-pin', 'conflicting-pin'])('runs th
   await writeFile(join(directory, 'state.json'), JSON.stringify(repository) + '\n'); await git('add', '--', 'state.json'); await git('commit', '--signoff', '-m', 'Initial state');
   await git('push', '--porcelain', remote, 'HEAD:refs/heads/steward/release-state'); await git('switch', 'main');
   const requests: { method: string; path: string; body: any }[] = [], comments: any[] = [], pulls: any[] = [];
-  const merges=new Map<number,{sha:string;at:string}>();let repairEvent:any=null;
+  const merges=new Map<number,{sha:string;at:string}>();
   let pr: any = null, modelCalls = 0;
   const head = async (branch: string) => { try { return await git('-C', remote, 'rev-parse', '--verify', `refs/heads/${branch}`); } catch { return null; } };
   const fetcher = (async (input, init) => {
@@ -61,7 +61,6 @@ it.each(['old-source', 'new-source', 'missing-pin', 'conflicting-pin'])('runs th
     else if(path.endsWith('/commits/main'))value={sha:await head('main')};
     else if(path.endsWith('/pulls/1'))value={number:1,merged:true,merge_commit_sha:B,base:{ref:'main',repo:{id:1}},head:{repo:{id:1}}};
     else if(path.endsWith('/collaborators/axiomoth/permission'))value={user:{id:7,login:'axiomoth'}};
-    else if(path.endsWith('/issues/events/91'))value=repairEvent;
     else if (path.includes('/git/ref/heads/')) { const branch = path.split('/git/ref/heads/')[1]!, sha = await head(branch); if (!sha) return new Response('{}', { status: 404 }); value = { ref: `refs/heads/${branch}`, object: { sha, type: 'commit' } }; }
     else if (path.endsWith('/rules/branches/main')) value = [{ type: 'non_fast_forward' }, { type: 'deletion' }];
     else if (releaseProtectionFixture(path)) value = releaseProtectionFixture(path);
@@ -91,8 +90,7 @@ it.each(['old-source', 'new-source', 'missing-pin', 'conflicting-pin'])('runs th
     else if (/\/issues\/[0-9]+\/events$/.test(path)) {
       const number=Number(path.split('/').at(-2)),merge=merges.get(number),id=number+3;
       value=[...(merge?[{id,event:'merged',url:`https://api.github.com/repos/fixture/product/issues/events/${id}`,
-        commit_id:merge.sha,commit_url:`https://api.github.com/repos/fixture/product/commits/${merge.sha}`,actor:{id:7},created_at:merge.at}]:[]),
-        ...(number===9&&repairEvent?[repairEvent]:[])];
+        commit_id:merge.sha,commit_url:`https://api.github.com/repos/fixture/product/commits/${merge.sha}`,actor:{id:7},created_at:merge.at}]:[])];
     }
     else if (/\/git\/blobs\/[a-f0-9]{40}$/.test(path)) value={encoding:'base64',content:(await promisify(execFile)('git',
       ['cat-file','blob',path.split('/').at(-1)!],{cwd:directory,env,encoding:'buffer',windowsHide:true})).stdout.toString('base64')};

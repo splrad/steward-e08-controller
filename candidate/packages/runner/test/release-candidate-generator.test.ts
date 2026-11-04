@@ -158,3 +158,41 @@ it('keeps native workspace dependency propagation and all package projections', 
   const app = JSON.parse(result.snapshot.files.find(file => file.path === 'app/package.json')!.content!);
   expect(app).toMatchObject({ version: '1.0.1', dependencies: { lib: '^1.1.0' } });
 });
+
+
+it.each(['tag', 'baseline', 'full-tree'] as const)('keeps an app baseline separate from a lib %s boundary', async kind => {
+  const f = fixture(true), older = 'e'.repeat(40), oldFeature = 'f'.repeat(40);
+  f.facts.manifest = JSON.stringify({app:'1.1.0',lib:kind==='full-tree'?'0.0.0':'1.0.0'});
+  f.files.set('.release-please-manifest.json', f.facts.manifest); f.files.set('app/version.txt','1.1.0\n');
+  f.facts.boundaries = [{path:'app',kind:'baseline',sha:C,reference:'app-cycle',found:true},
+    {path:'lib',kind,sha:kind==='full-tree'?null:older,reference:kind==='full-tree'?null:'lib-v1.0.0',found:true}];
+  f.commits.splice(0,f.commits.length,
+    {sha:B,message:'fix: current app repair',files:['app/code.ts']},
+    {sha:C,message:'chore: app version 1.1.0',files:[]},
+    {sha:oldFeature,message:'feat: app already released\n\nfix: lib change',files:['app/code.ts','lib/code.ts']},
+    {sha:older,message:'chore: old lib boundary',files:[]});
+  f.client.releaseIterator=async function*(){if(kind==='tag')yield {id:2,tagName:'lib-v1.0.0',sha:older,url:'https://github.com/fixture/product/releases/2',notes:''};};
+  f.facts.releases=kind==='tag'?[{id:2,tag:'lib-v1.0.0',sha:older,bodyDigest:'d'.repeat(64),draft:false}]:[];
+  const result=await generateCandidate(B,f.options);
+  expect(result.status).toBe('READY');if(result.status!=='READY')throw Error('candidate required');
+  expect(result.snapshot.units.find(u=>u.id==='app')?.version).toBe('1.1.1');
+  expect(result.snapshot.units.find(u=>u.id==='lib')?.version).toBe(kind==='full-tree'?'1.0.0':'1.1.0');
+  expect(result.snapshot.files.find(file=>file.path==='app/CHANGELOG.md')?.content).not.toContain('already released');
+});
+
+
+it('applies baseline input before native workspace dependency propagation', async () => {
+  const f=fixture(true),older='e'.repeat(40),oldFeature='f'.repeat(40);
+  const config=JSON.stringify({'separate-pull-requests':false,plugins:['node-workspace'],packages:{app:{'release-type':'node',component:'app'},lib:{'release-type':'node',component:'lib'}}});
+  f.facts.config=config;f.files.set('release-please-config.json',config);
+  f.facts.manifest=JSON.stringify({app:'1.1.0',lib:'1.0.0'});f.files.set('.release-please-manifest.json',f.facts.manifest);
+  f.files.set('app/package.json',JSON.stringify({name:'app',version:'1.1.0',dependencies:{lib:'^1.0.0'}}));
+  f.files.set('lib/package.json',JSON.stringify({name:'lib',version:'1.0.0'}));
+  f.facts.boundaries=[{path:'app',kind:'baseline',sha:C,reference:'app-cycle',found:true},{path:'lib',kind:'tag',sha:older,reference:'lib-v1.0.0',found:true}];
+  f.commits.splice(0,f.commits.length,{sha:B,message:'feat: lib API',files:['lib/api.ts']},{sha:C,message:'chore: app release',files:[]},
+    {sha:oldFeature,message:'feat: app already released',files:['app/api.ts']},{sha:older,message:'chore: lib release',files:[]});
+  f.client.releaseIterator=async function*(){yield {id:2,tagName:'lib-v1.0.0',sha:older,url:'https://github.com/fixture/product/releases/2',notes:''};};
+  const result=await generateCandidate(B,f.options);if(result.status!=='READY')throw Error('candidate required');
+  expect(result.snapshot.units.map(u=>[u.id,u.version])).toEqual([['app','1.1.1'],['lib','1.1.0']]);
+  expect(JSON.parse(result.snapshot.files.find(file=>file.path==='app/package.json')!.content!).dependencies.lib).toBe('^1.1.0');
+});

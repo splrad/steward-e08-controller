@@ -100,3 +100,22 @@ it('honors an old cycle read backoff while preparing and building the next regis
   await serviceReleaseWake({},async()=>snapshot,async(command:string,input:any)=>{calls.push(`${command}:${input.cycleId}`);return {status:'WAIT',publishInvoked:false};},()=>START);
   expect(calls).toContain('candidate:new');expect(calls).toContain('dispatch-build:new');expect(calls.some(value=>value.endsWith(':old'))).toBe(false);
 });
+
+
+it.each([{status:'WAIT',reason:'EDITING'}, {status:'WAIT',reason:'CONTENT_WAIT_AUTH'},
+  {status:'CONFLICT',reason:'HUMAN_EDIT_CONFLICT'}, {status:'READY',prNumber:9},
+  {status:'WAIT',reason:'UNCHANGED'}])('retains candidate result with already completed cycles: %j', async candidate => {
+  const source={repositoryId:1,cycleId:'pr-9-'+'b'.repeat(40),sourceSha:'b'.repeat(40),deliveryConfigSha:'c'.repeat(40),
+    units:[{id:'app',version:'1.0.0',tag:'v1.0.0',releaseId:7,authorId:42,manifestDigest:'d'.repeat(64),notesDigest:'e'.repeat(64),assets:[{path:'app.zip',size:12,sha256:'d'.repeat(64)}]}],requiredChannels:[]};
+  const {id,...unit}=source.units[0]!;
+  const observation={source:structuredClone(source),sourceComplete:true,observedAt:new Date(START).toISOString(),releasesComplete:true,channelsComplete:true,
+    releases:[{...unit,unitId:id,sourceSha:source.sourceSha,draft:false,immutable:true,evidenceDigest:'e'.repeat(64)}],
+    channels:[],consumptions:[],inFlightWaveKeys:[],unknownWriteKeys:[]};
+  const snapshot={repository:{activeCycleId:null,candidate:candidate.reason==='UNCHANGED'?null:{prNumber:9}},
+    cycles:[{value:{id:source.cycleId,completedEvidencePath:'evidence/completion/old.json',dispatches:[]}}],
+    domainRecords:[{path:'evidence/completion/old.json',value:{source,observation}}]};
+  const calls:string[]=[];
+  const result=await serviceReleaseWake({},async()=>snapshot,async(command:string)=>{calls.push(command);return candidate;});
+  expect(calls).toEqual(['candidate']);
+  expect(result).toEqual(candidate.reason==='UNCHANGED'?{status:'COMPLETE',reason:'REGISTERED_RELEASES_VERIFIED'}:candidate);
+});

@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { planContentBatches, resumeContentBatches, assembleUnitNotes, contentWireInput, type ContentSource, type ContentRuntime, type ContentCache, type ContentWork } from '../src/release-content.js';
-import { splitContentText, validateContentResult, validateContentInput, releaseAffectedUnitIds, type ContentInput, type ContentItem } from '../../core/src/release-content.js';
+import { splitContentText, validateContentResult, validateContentInput, type ContentInput, type ContentItem } from '../../core/src/release-content.js';
 
 const digest = (v: string) => createHash('sha256').update(v).digest('hex');
 const input = (): ContentInput => ({ schemaVersion: 1, repositoryId: 1, candidateId: digest('candidate'), baseSha: 'a'.repeat(40), controllerSha: 'b'.repeat(40),

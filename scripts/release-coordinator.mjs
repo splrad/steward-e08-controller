@@ -46,7 +46,8 @@ export async function serviceReleaseWake(request,refresh,invoke,clock=Date.now) 
       await refresh();results.push(await invoke('rerun',{...request,runId:dispatch.canonicalRunId}));
     }
   }
-  if(!results.length)return snapshot.cycles.length?{status:'COMPLETE',reason:'REGISTERED_RELEASES_VERIFIED'}:candidate;
+  if(!results.length)return snapshot.cycles.length && candidate.status==='WAIT' && candidate.reason==='UNCHANGED' && !snapshot.repository.candidate
+    ?{status:'COMPLETE',reason:'REGISTERED_RELEASES_VERIFIED'}:candidate;
   const nextCheckAt=results.map(value=>value.nextCheckAt??value.observation?.readObservation?.nextCheckAt).filter(Boolean).sort().at(-1)??null;
   if(results.some(value=>['UNKNOWN','CONFLICT','BLOCKED'].includes(value.status)))return {status:'UNKNOWN',reason:'NATIVE_EVIDENCE_REQUIRED',nextCheckAt};
   return {status:'WAIT',reason:'REGISTERED_CYCLES_OBSERVED',nextCheckAt};

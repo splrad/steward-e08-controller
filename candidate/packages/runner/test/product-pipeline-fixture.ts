@@ -57,6 +57,7 @@ export function productPipelineFixture(attempts = 1, twoUnits = false) {
   const calls: string[] = [];
   const gh = async (args: readonly string[]) => {
     const path = args.at(-1)!; calls.push(path);
+    if (path === `repos/${f.context.repository}`) return JSON.stringify({id:f.context.repositoryId,full_name:f.context.repository,private:false,visibility:'public',default_branch:'main',archived:false,disabled:false});
     if (path === 'users/splrad-steward%5Bbot%5D') return JSON.stringify({ id: 42, type: 'Bot', login: 'splrad-steward[bot]' });
     if (path.endsWith('/heads/steward/release-state')) return JSON.stringify({ ref: 'refs/heads/steward/release-state', object: { type: 'commit', sha: D } });
     if (path.endsWith('/heads/' + f.request.ref)) return JSON.stringify({ ref: `refs/heads/${f.request.ref}`, object: { type: 'commit', sha: S } });

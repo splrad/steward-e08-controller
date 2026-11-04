@@ -193,3 +193,16 @@ describe('完整 Git 发布输入', { timeout: 30_000 }, () => {
     await expect(freezeReleaseGitInput({ ...f.options(), identity: { ...f.options().identity, targetSha: 'b'.repeat(40) } })).rejects.toThrow('Git read failed');
   });
 });
+
+
+it.each(['.', 'packages/app'])('selects only the configured HISTORY.md for unit %s', async path => {
+  const f=fixture(),notes='## 1.1.0\n\n### Bug Fixes\n\n* current repair\n\n## 1.0.0\n\n* old history\n';
+  const prefix=path==='.'?'':path+'/';
+  const collected=await collectContentInput({directory:f.workspace,candidateId:'d'.repeat(64),configDigest:'e'.repeat(64),repository:'fixture/product',
+    units:[{...f.options(),unit:{...f.options().unit,path},changelogPath:'HISTORY.md'}],
+    preparedChanges:[{path:prefix+'HISTORY.md',content:notes},{path:prefix+'CHANGELOG.md',content:notes.replace('current repair','wrong file')},
+      {path:prefix+'nested/HISTORY.md',content:notes.replace('current repair','nested file')} ]});
+  expect(collected.sources.map(source=>source.path)).toEqual([prefix+'HISTORY.md']);
+  expect(collected.sources[0]!.text).toContain('current repair');
+  expect(collected.sources[0]!.text).not.toMatch(/old history|wrong file|nested file/);
+});
