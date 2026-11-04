@@ -79,3 +79,76 @@ it.each([410,403])('central HTTP %i uses only complete original coverage and nev
   const recovered=await inspectPublications(f.context,f.history,f.productIo,f.centralIo,'2026-11-26T00:00:00.000Z');
   expect(recovered.native.runs[0]?.availability).toBe(status===410?'expired':undefined);
 });
+
+async function draftFixture() {
+  const f=fixture();await invokePublication(f.context,f.current,[],f.store,f.productIo,f.centralIo,async()=>{},NOW,()=>NOW);f.terminal();
+  const unit=f.context.cycle.units[0]!,marker=`<!-- steward-release:${digest(JSON.stringify([f.context.repositoryId,unit.id,unit.tag,S,unit.manifestDigest]))} -->`;
+  const release:any={id:50,tag_name:unit.tag,target_commitish:S,author:{id:42},body:marker,draft:true,immutable:false};
+  let assets:any[]=[],inventory:any[]=[release],listStatus=200,reads=0,changeBody=false;
+  const original=f.productIo.request,io:EvidenceTransport={async request(method,path,...args) {
+    expect(method).toBe('GET');f.calls.push(method+' '+path);
+    if(path.includes('/releases/tags/'))return f.response({},404);
+    if(path.endsWith('/releases?per_page=100'))return f.response(inventory,listStatus);
+    if(path.endsWith('/releases/50')){reads++;return f.response({...release,body:changeBody&&reads>1?'changed':release.body});}
+    if(path.includes('/releases/50/assets'))return f.response(assets);
+    return original(method,path,...args);
+  }};
+  return {...f,io,release,marker,setAssets:(value:any[])=>{assets=value;},setInventory:(value:any[])=>{inventory=value;},
+    denyList:()=>{listStatus=403;},changeBody:()=>{changeBody=true;}};
+}
+it.each(['empty','partial','notes'] as const)('reconciles an existing %s draft by native ID without claiming publication success',async kind=>{
+  const f=await draftFixture(),before=f.history.map(file=>file.value);
+  if(kind==='partial') {
+    f.context.cycle.units[0]!.assets.push({id:'second',path:'second.zip',size:6,sha256:digest('second')});
+    f.setAssets([{id:51,name:'app.zip',size:6}]);
+  }
+  if(kind==='notes')f.release.body='notes';
+  const p=await inspectPublications(f.context,f.history,f.io,f.centralIo,NOW);
+  expect(p.native.complete).toBe(true);expect(p.missing).toEqual([]);
+  expect(p.native.attempts.flatMap(a=>a.invocations.map(i=>i.evidence.outcome))).toEqual(['BUSINESS_FAILED']);
+  expect(JSON.parse(p.files[0]!.content).objects).toEqual([expect.objectContaining({releaseId:50,status:'ABSENT',digest:expect.any(String),sourceUrl:'https://api.github.com/repos/example/product/releases/50'})]);
+  expect(f.history.map(file=>file.value)).toEqual(before);
+  const observed=await inspectNativeCycle(f.context,[],f.io,NOW,{complete:true,observations:[],publication:p});
+  expect(observed.currentFacts.unknownEvidence).toEqual([]);expect(observed.currentFacts.conflictEvidence).toEqual([]);
+});
+it.each(['author','source','marker','asset','extra','duplicate','ambiguous','changed'] as const)('keeps a draft with %s conflict blocked',async kind=>{
+  const f=await draftFixture();
+  if(kind==='author')f.release.author.id=99;
+  if(kind==='source')f.release.target_commitish=C;
+  if(kind==='marker')f.release.body='unrelated draft';
+  if(kind==='asset')f.setAssets([{id:51,name:'app.zip',size:7}]);
+  if(kind==='extra')f.setAssets([{id:51,name:'other.zip',size:6}]);
+  if(kind==='duplicate')f.setAssets([{id:51,name:'app.zip',size:6},{id:51,name:'app.zip',size:6}]);
+  if(kind==='ambiguous')f.setInventory([f.release,{...f.release,id:52}]);
+  if(kind==='changed')f.changeBody();
+  const p=await inspectPublications(f.context,f.history,f.io,f.centralIo,NOW);
+  expect(p.native.attempts.flatMap(a=>a.invocations.map(i=>i.evidence.outcome))).toEqual([kind==='duplicate'?'UNKNOWN':'FACT_CONFLICT']);
+  const facts=(await inspectNativeCycle(f.context,[],f.io,NOW,{complete:true,observations:[],publication:p})).currentFacts;
+  expect(facts.unknownEvidence.length+facts.conflictEvidence.length).toBeGreaterThan(0);
+});
+it('retains an old UNKNOWN receipt while fresh complete draft reads reconcile the current effect',async()=>{
+  const f=await draftFixture();f.denyList();
+  const unknown=await inspectPublications(f.context,f.history,f.io,f.centralIo,NOW);
+  expect(unknown.native.attempts[0]!.invocations[0]!.evidence.outcome).toBe('UNKNOWN');
+  expect((await inspectNativeCycle(f.context,[],f.io,NOW,{complete:true,observations:[],publication:unknown})).currentFacts.unknownEvidence.length).toBeGreaterThan(0);
+  await f.store.archive(unknown.files);const retained=unknown.files[0]!.content;
+  const recovered=await draftFixture();
+  const observed=await inspectPublications(f.context,f.history,recovered.io,f.centralIo,NOW);
+  expect(observed.native.attempts[0]!.invocations[0]!.evidence.outcome).toBe('BUSINESS_FAILED');
+  expect(f.files.some(file=>file.content===retained)).toBe(true);
+});
+
+it('does not adopt a discovered draft when the next inventory page is denied',async()=>{
+  const f=await draftFixture(),original=f.io.request;
+  const io:EvidenceTransport={async request(method,path,...args) {
+    if(path.endsWith('/releases?per_page=100')) {
+      const response=f.response([f.release]);response.headers.set('link','<https://api.github.com/repos/example/product/releases?per_page=100&page=2>; rel="next"');return response;
+    }
+    if(path.endsWith('/releases?per_page=100&page=2'))return f.response({},403);
+    return original(method,path,...args);
+  }};
+  const p=await inspectPublications(f.context,f.history,io,f.centralIo,NOW);
+  expect(p.native.attempts[0]!.invocations[0]!.evidence.outcome).toBe('UNKNOWN');
+  expect(JSON.parse(p.files[0]!.content).objects[0].releaseId).toBeNull();
+  expect((await inspectNativeCycle(f.context,[],io,NOW,{complete:true,observations:[],publication:p})).currentFacts.unknownEvidence.length).toBeGreaterThan(0);
+});

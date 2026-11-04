@@ -15,6 +15,14 @@ it('recovers half-uploaded seven-file release and lost upload/body/publication r
   expect(f.calls.find(args => args[0] === 'attestation')).toEqual(expect.arrayContaining(['--source-ref', (f.target.manifest as ProductReleaseManifest).buildRef,
     '--signer-workflow', 'fixture/product/.github/workflows/steward-release-publish.yml', '--signer-digest', f.target.manifest.sourceSha]));
 });
+it.each([false,true])('adopts an existing draft and completes it without creating another release; partial=%s',async partial=>{
+  const f=await fixture();if(partial)f.put('app.exe',Buffer.from('app'));
+  const target=await f.adapter.ensureDraft({...f.target,releaseId:null});
+  expect(target.releaseId).toBe(20);expect(writes(f)).toHaveLength(0);
+  expect((await f.adapter.publish(target)).mode).toBe('verified');
+  expect([...f.releases.keys()]).toEqual([20]);expect(f.remote.size).toBe(7);
+  expect(writes(f).some(args=>args.includes('repos/fixture/product/releases'))).toBe(false);
+});
 it('published reentry is entirely read-only', async () => {
   const f = await fixture(); await f.preload(); Object.assign(f.release, { draft: false, immutable: true, body: await readFile(join(f.target.directory,'release-notes.md'),'utf8') });
   await f.adapter.publish(f.target); expect(writes(f)).toHaveLength(0);

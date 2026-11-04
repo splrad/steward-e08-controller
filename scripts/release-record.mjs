@@ -542,7 +542,7 @@ export async function inspectReleaseEvidence(request,{token,io=nativeEvidenceTra
       if(value.startEvidencePath===null&&readback.domainRecords.some(other=>other.path.startsWith('evidence/publication/')&&other.path!==file.path
         &&other.value.startEvidencePath===null&&other.value.execution.invocationKey===value.execution.invocationKey))return {status:'CONFLICT',head:readback.head,records:[]};
     }
-    snapshot=readback;
+    snapshot=readback;request.directory=directory;
     return {...written,files:files.filter(file=>readback.domainRecords.some(record=>record.path===file.path&&JSON.stringify(record.value)===JSON.stringify(JSON.parse(file.content)))),records:readback.domainRecords.filter(record=>record.path.startsWith('evidence/native/')).map(record=>({path:record.path,commit:record.commit,value:record.value}))};
   }};
   const observedAt=now();
@@ -552,9 +552,6 @@ export async function inspectReleaseEvidence(request,{token,io=nativeEvidenceTra
     const saved=await store.archive([...observation.archives.map(archiveFile),nativeReadFile(observation.readObservation)]);
     if(!['APPLIED','UNCHANGED'].includes(saved.status)||observation.currentFacts.unknownEvidence.length||observation.currentFacts.conflictEvidence.length)return {status:'UNKNOWN',reason:'PUBLICATION_EVIDENCE_UNKNOWN',publishInvoked:false};
     if(observation.currentFacts.inFlightWaveKeys.length)return {status:'WAIT',reason:'RUN_IN_FLIGHT',publishInvoked:false};
-    const attempts=[...publication.native.attempts,...(publication.archived??[]).map(item=>item.attempt)];
-    if(attempts.some(item=>item.runId!==centralInvocation.runId&&item.invocations.some(inv=>inv.evidence.outcome==='BUSINESS_FAILED')))
-      return {status:'BLOCKED',reason:'NATIVE_MAINTENANCE_REQUIRED',publishInvoked:false};
 
     return invokePublication(context,centralInvocation,publications,store,io,centralIo,()=>publisher(context,async next=>{
       const adopted=await adoptReleaseCycle(request,snapshot,next,{token,io});
