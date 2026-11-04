@@ -91,29 +91,44 @@ const repository={id:1440689606,full_name:'splrad/steward-e08-bootstrap',default
       let readCredential='';
       const git=async(...args)=>(await promisify(execFile)('git',['--no-replace-objects','-c','core.hooksPath=','-c','credential.helper=',...args],{cwd:directory,
         env:{...clean,...(readCredential?{GIT_CONFIG_COUNT:'1',GIT_CONFIG_KEY_0:'http.https://github.com/'+repository.full_name+'.git.extraheader',
-          GIT_CONFIG_VALUE_0:'AUTHORIZATION: basic '+Buffer.from('x-access-token:'+readCredential).toString('base64')}:{})},timeout:90000})).stdout.trim();
+          GIT_CONFIG_VALUE_0:'AUTHORIZATION: basic '+Buffer.from('x-access-token:'+readCredential).toString('base64')}:{})},timeout:90000})).stdout;
       await git('init','--initial-branch=main');await git('remote','add','origin','https://github.com/'+repository.full_name+'.git');
       const request={directory,writeDirectory:join(root,'candidate-writes'),remote:'https://github.com/'+repository.full_name+'.git',repository:repository.full_name,
         repositoryId:repository.id,defaultBranch:'main',appBotId:app.appBotId,identity:{name:app.appBotLogin,email:app.appBotId+'+'+app.appBotLogin+'@users.noreply.github.com'}};
-      const stateSnapshot=async()=>{
+      // Dedicated READY fixture: an existing cycle, no candidate, and new releasable source.
+      const stateSnapshot=async(cycleId)=>{
         await git('fetch','--no-tags',request.remote,'refs/heads/steward/release-state');
-        const head=await git('rev-parse','FETCH_HEAD');
+        const head=(await git('rev-parse','FETCH_HEAD')).trim();
         await git('update-ref','refs/heads/steward/release-state',head);
         const state=await (await import(record)).readReleaseRecords({directory,targetRef:'steward/release-state',repositoryId:repository.id});
-        check(state.head===head&&Boolean(state.repository.activeCycleId),'CANDIDATE_ACTIVE_CYCLE_REQUIRED');
-        return {head,cycleId:state.repository.activeCycleId,stateDigest:hash(await git('show',head+':state.json')),
-          cycleDigest:hash(await git('show',head+':cycles/'+state.repository.activeCycleId+'.json'))};
+        check(state.head===head,'CANDIDATE_STATE_READBACK');
+        cycleId??=state.repository.activeCycleId;
+        check(Boolean(cycleId),'CANDIDATE_FIXTURE_REGISTERED_CYCLE_REQUIRED');
+        return {head,cycleId,candidate:state.repository.candidate,stateDigest:hash(await git('show',head+':state.json')),
+          cycleDigest:hash(await git('show',head+':cycles/'+cycleId+'.json'))};
       };
-      let before;
-      const language={preflight:async()=>{throw Error('MODEL_PREFLIGHT_NOT_EXPECTED');},call:async()=>{evidence.modelCalls++;throw Error('MODEL_CALL_NOT_EXPECTED');}};
+      const {fixedContentSdk,fixtureModel}=await import(fileUrl('e08-python/fixed-content-sdk.mjs'));
+      const sdk=fixedContentSdk();evidence.fixtureModel=fixtureModel;evidence.fixtureCalls=0;
+      let before,first;
+      const language={preflight:()=>sdk.preflight(),call:async input=>{evidence.fixtureCalls++;return sdk.call(input);}};
       for(let pass=1;pass<=2;pass++){
         await app.forCandidateRepository(repository.id,async(token,readToken)=>{
           readCredential=readToken;
           try{
-            if(!before){before=await stateSnapshot();evidence.candidateBefore=before;}
-            const result=await awaitCandidate(token,readToken),after=await stateSnapshot();evidence.results.push({pass,...result,state:after});
-            check(result.status==='WAIT'&&result.reason==='ACTIVE_CYCLE','CANDIDATE_CONSUMER_RESULT');
-            check(JSON.stringify(after)===JSON.stringify(before),'CANDIDATE_CYCLE_CHANGED');
+            if(!before){before=await stateSnapshot();evidence.candidateBefore=before;
+              check(before.candidate===null,'CANDIDATE_FIXTURE_NO_CANDIDATE_REQUIRED');}
+            const result=await awaitCandidate(token,readToken),after=await stateSnapshot(before.cycleId);
+            evidence.results.push({pass,...result,state:after,fixtureCalls:evidence.fixtureCalls});
+            check(after.cycleDigest===before.cycleDigest,'CANDIDATE_CYCLE_CHANGED');
+            check(!(result.status==='WAIT'&&result.reason==='UNCHANGED'),'CANDIDATE_FIXTURE_RELEASABLE_SOURCE_REQUIRED');
+            check(result.status==='READY','CANDIDATE_CONSUMER_RESULT');
+            const candidate=after.candidate;
+            check(candidate&&Number.isSafeInteger(result.prNumber)&&result.prNumber>0&&candidate.prNumber===result.prNumber
+              &&candidate.publishedHead===result.head&&/^[a-f0-9]{40}$/.test(result.head)
+              &&typeof candidate.id==='string'&&candidate.id.length>0&&typeof candidate.branch==='string'&&candidate.branch.length>0,'CANDIDATE_READBACK');
+            const replay={id:candidate.id,prNumber:result.prNumber,branch:candidate.branch,head:result.head,fixtureCalls:evidence.fixtureCalls};
+            if(pass===1){check(evidence.fixtureCalls>0,'CANDIDATE_FIXTURE_CONTENT_REQUIRED');first=replay;}
+            else check(JSON.stringify(replay)===JSON.stringify(first),'CANDIDATE_REPLAY_CHANGED');
           }finally{readCredential='';}
         });
       }
