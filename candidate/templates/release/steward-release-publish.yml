@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: splrad/steward-e08-controller
-          ref: 90ab959c4d09fe1f39fa372064ccf0ffbb3dbe36
+          ref: 11ca0af1bdea87358da98329792f4dfaf326ffe5
           path: controller
           persist-credentials: false
       - name: Enable Git long paths
@@ -124,7 +124,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: splrad/steward-e08-controller
-          ref: 90ab959c4d09fe1f39fa372064ccf0ffbb3dbe36
+          ref: 11ca0af1bdea87358da98329792f4dfaf326ffe5
           path: controller
           persist-credentials: false
       - name: Enable Git long paths
@@ -151,6 +151,12 @@ jobs:
         working-directory: controller
         shell: pwsh
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install locked native metadata reader
+        working-directory: controller
+        shell: pwsh
+        run: |
+          uv sync --project tools/template --frozen --only-group release-inspection --no-build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Read build record
         id: unit
         shell: pwsh
@@ -238,7 +244,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.admit.outputs.units) }}
-    uses: splrad/steward-e08-controller/.github/workflows/product-release.yml@90ab959c4d09fe1f39fa372064ccf0ffbb3dbe36
+    uses: splrad/steward-e08-controller/.github/workflows/product-release.yml@11ca0af1bdea87358da98329792f4dfaf326ffe5
     with:
       record: ${{ needs.admit.outputs.record }}
       unit: ${{ matrix.unit }}
@@ -265,7 +271,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: splrad/steward-e08-controller
-          ref: 90ab959c4d09fe1f39fa372064ccf0ffbb3dbe36
+          ref: 11ca0af1bdea87358da98329792f4dfaf326ffe5
           path: controller
           persist-credentials: false
       - name: Enable Git long paths
@@ -292,6 +298,12 @@ jobs:
         working-directory: controller
         shell: pwsh
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install locked native metadata reader
+        working-directory: controller
+        shell: pwsh
+        run: |
+          uv sync --project tools/template --frozen --only-group release-inspection --no-build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Read build record
         shell: pwsh
         env:

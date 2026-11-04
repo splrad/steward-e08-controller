@@ -27,7 +27,7 @@ export async function generateReleaseSbom(record: { sourceSha: string }, directo
     locks.push({ path, sha256: createHash('sha256').update(bytes).digest('hex') });
   }
   const output = join(directory, 'sbom.spdx.json');
-  await execute(await resolvePolicyTool('syft'), ['dir:' + staging, '-o', 'spdx-json=' + output]);
+  await execute(await resolvePolicyTool('syft', policyDirectory), ['dir:' + staging, '-o', 'spdx-json=' + output]);
   const sbom = JSON.parse(await readFile(output, 'utf8'));
   if (sbom.spdxVersion !== 'SPDX-2.3' || !Array.isArray(sbom.packages) || !sbom.packages.length) throw new Error('SBOM_INCOMPLETE_SCAN');
   sbom.annotations ??= [];
