@@ -81,6 +81,7 @@ it('prepares the original sealed Release bytes without consulting a new build wo
   const records=await pipelinePreparePublication(f.context,output,'controller','token',f.gh,f.io,f.io,async(_repo,id,path)=>{
     await writeFile(path,await readFile(join(f.root,f.assets[id-700]!.path)));
   },[f.record]);
+  if(!Array.isArray(records))throw Error('legacy publication expected');
   expect(records[0]).toMatchObject({build:null,manifest:f.manifest});expect(f.calls.some(p=>p.includes('/actions/')||p.includes('/workflows/'))).toBe(false);
 });
 it.each(['required','manifest','descriptor','projection','path'])('rejects lost or substituted legacy obligations: %s',async kind=>{

@@ -4,9 +4,9 @@
   "bindings": [
     {
       "file": "packages/runner/src/release-pipeline.js",
-      "sourceSha256": "c40f3c76cbb2672b096916bbbbd68068357bc40e7bb92c80df140f74267d10f9",
-      "compiledBeforeSha256": "cb00e4632729987f993ac6d1eb90185de2ad5f583d9541a4d05826ef86fd3fe4",
-      "compiledAfterSha256": "96f86cf10a5452d83517c940ec437728d65f79f0f457283baac51e38a23e1408",
+      "sourceSha256": "3f49975cc0e2855cdd8d86d47dd564889ff49ca5d02c9a6204e83196567ff71b",
+      "compiledBeforeSha256": "10e44c420acb0dc8d518a3b84777200068ee3e18aaededae2c7c1094fdb99cfd",
+      "compiledAfterSha256": "8f8810a27d57a5fe2caf17745e1e7e68a9a75e00dbeba933fae3dfc74d4c9a21",
       "replacements": [
         {
           "from": "splrad-steward",
@@ -131,8 +131,8 @@
     },
     {
       "name": "index.js",
-      "bytes": 2111566,
-      "sha256": "344726e233af2df83310b63a98da64a42bbc343f177b6cb82364e9ff4c162347"
+      "bytes": 2111675,
+      "sha256": "ed241dc068428b73dcd42b3c4f4619523292bacf2b789b121ab3616c56d80923"
     },
     {
       "name": "package.json",

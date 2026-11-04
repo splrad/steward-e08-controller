@@ -93,7 +93,7 @@ async function verifyCurrentEvidence(request,snapshot,io,centralIo,now) {
       {complete:true,publication,observations:snapshot.domainRecords.filter(r=>r.path.startsWith('evidence/reads/')).map(r=>r.value),
         retryLimits:snapshot.domainRecords.filter(r=>r.path.startsWith('evidence/retry-limit/')),sourceRejections:snapshot.domainRecords.filter(r=>r.path.startsWith('evidence/source-rejection/')),
         channelEvidence:snapshot.domainRecords.filter(r=>r.path.startsWith('evidence/channel/')||r.path.startsWith('evidence/channel-read/'))});
-    if(evidence.currentFacts.unknownEvidence.length||evidence.currentFacts.conflictEvidence.length||evidence.readObservation.disposition!=='COMPLETE')fail('original native evidence unknown');
+    if(evidence.currentFacts.unknownEvidence.length||evidence.currentFacts.conflictEvidence.length||evidence.currentFacts.inFlightWaveKeys.length||evidence.readObservation.disposition!=='COMPLETE')fail('original native evidence unknown');
   }
 }
 

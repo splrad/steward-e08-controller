@@ -623,6 +623,7 @@ export async function publishNativeCycle(request,{token,io=nativeEvidenceTranspo
     const context={repository:request.repository,repositoryId:request.repositoryId,appBotId:request.appBotId,cycle};
     const normalized=await ensureCycleDelivery(request,snapshot,cycle,{token,io,centralIo,now});snapshot=normalized.snapshot;request={...request,directory:normalized.directory};
     const records=await pipelinePreparePublication(context,root,controllerDirectory,token,undefined,io,undefined,undefined,snapshot.domainRecords);
+    if(!Array.isArray(records))return records;
     const adapter=new NativeGitHubRelease(args=>nativeGhCommand(args,token),nativeReleaseDownload(token));
     for(const item of records) {
       const unit=cycle.units.find(value=>value.id===item.unitId),names=adapter.names({manifest:item.manifest,directory:item.directory,releaseId:unit.releaseId,appBotId:request.appBotId});

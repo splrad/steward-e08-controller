@@ -8,6 +8,8 @@ import {tmpdir} from 'node:os';
 import {pathToFileURL} from 'node:url';
 import {registerOfflineFixtureRoot,permitOfflineScript} from './offline-fixtures.js';
 import {isolatedBuildEnvironment} from '../src/build-environment.js';
+import {createHash} from 'node:crypto';
+import {inspectNativeCycle} from '../src/native-release-evidence.js';
 import {prepareBuildDispatch} from '../src/release-run.js';
 const {initializeReleaseAdoption,withReleaseAdoption,recoverReleaseCaches}=await import(pathToFileURL(resolve('scripts/release-adoption.mjs')).href);
 const {readReleaseRecords}=await import(pathToFileURL(resolve('scripts/release-record.mjs')).href);
@@ -115,13 +117,35 @@ it('rejects a later onboarding PR without moving the adopted A/P',async()=>{
   const result=await initializeReleaseAdoption({...f.request,releaseAdoption:{sourceSha:later,prNumber:8}},{io:f.io});
   expect(result).toMatchObject({status:'CONFLICT',reason:'RELEASE_ADOPTION_CHANGED'});expect(await f.stateHead()).toBe(first.head);
 });
-it.each([false,true])('restores original cycle cache only with a known original evidence; missing evidence=%s',async missingBudget=>{
+it.each(['terminal','missing','in-progress'])('restores original cycle cache only with known terminal evidence: %s',async kind=>{
   const f=await fixture();await initializeReleaseAdoption(f.request,{io:f.io});await f.fetchState();
   await writeFile(join(f.request.directory,'VERSION'),'1.0.0\n');await writeFile(join(f.request.directory,'.release-please-manifest.json'),'{".":"1.0.0"}\n');
   await f.git('add','VERSION','.release-please-manifest.json');await f.git('commit','--signoff','-m','chore: release 1.0.0');const S=await f.git('rev-parse','main');
   const cycle:any={id:`pr-8-${S}`,prNumber:8,sourceSha:S,controllerSha:'b'.repeat(40),deliveryConfigSha:'c'.repeat(40),
     units:[{id:'layerscape',version:'1.0.0',tag:'v1.0.0',releaseId:null,assets:[],notesDigest:null,manifestDigest:null}],requiredChannels:[],dispatches:[],publications:[],channelFacts:[],executionEvidence:[],completionObservations:[],completedEvidencePath:null,repairOf:null,approvedRepairDecision:null};
-  if(missingBudget)cycle.dispatches=[prepareBuildDispatch({repository:f.request.repository,repositoryId:f.request.repositoryId,appBotId:f.request.appBotId,cycle},10,'2026-10-31T00:00:00.000Z')];
+  if(kind!=='terminal')cycle.dispatches=[prepareBuildDispatch({repository:f.request.repository,repositoryId:f.request.repositoryId,appBotId:f.request.appBotId,cycle},10,'2026-10-31T00:00:00.000Z')];
+  const observedAt='2026-10-31T00:01:00.000Z';
+  if(kind==='in-progress') {
+    const request=cycle.dispatches[0];request.canonicalRunId=100;request.nativeResponseEvidencePath='evidence/dispatch.json';
+    const original=f.io.request,run={id:100,repository:{id:f.request.repositoryId},head_repository:{id:f.request.repositoryId},workflow_id:10,
+      path:'.github/workflows/steward-release-publish.yml',event:'workflow_dispatch',head_sha:S,head_branch:request.ref,
+      actor:{id:f.request.appBotId},triggering_actor:{id:f.request.appBotId},run_attempt:1,status:'in_progress',conclusion:null,
+      created_at:request.sentAt,updated_at:observedAt,display_title:request.operationKey};
+    const workflow=Buffer.from(`on: workflow_dispatch\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@${'d'.repeat(40)}\n        with:\n          repository: splrad/steward\n          ref: ${cycle.controllerSha}\n`);
+    f.io.request=async(method,path)=>{
+      let value:any;
+      if(path.includes('/actions/runs/100')&&path.includes('/jobs'))value={total_count:0,jobs:[]};
+      else if(path.includes('/actions/runs/100')&&path.includes('/artifacts'))value={total_count:0,artifacts:[]};
+      else if(path.includes('/actions/runs/100'))value=run;
+      else if(path.includes('/actions/workflows/10'))value={id:10,path:run.path};
+      else if(path.includes('/contents/.github/workflows/'))value={type:'file',encoding:'base64',content:workflow.toString('base64'),size:workflow.length,sha:createHash('sha1').update(`blob ${workflow.length}\0`).update(workflow).digest('hex')};
+      else return original(method,path);
+      expect(method).toBe('GET');return {status:200,bytes:new Uint8Array(Buffer.from(JSON.stringify(value))),headers:new Headers()};
+    };
+    const evidence=await inspectNativeCycle({repository:f.request.repository,repositoryId:f.request.repositoryId,appBotId:f.request.appBotId,cycle},[],f.io,observedAt,{complete:true,observations:[]});
+    expect(evidence.currentFacts.unknownEvidence).toEqual([]);expect(evidence.currentFacts.conflictEvidence).toEqual([]);
+    expect(evidence.readObservation.disposition).toBe('COMPLETE');expect(evidence.currentFacts.inFlightWaveKeys).not.toHaveLength(0);
+  }
   f.closed.push({number:8,merged:true,merge_commit_sha:S,user:{id:f.request.appBotId},base:{ref:'main',repo:{id:f.request.repositoryId}},head:{ref:'steward/release-candidate',repo:{id:f.request.repositoryId}}});
   await f.git('switch','--detach','refs/heads/steward/release-state');await mkdir(join(f.request.directory,'cycles'));
   const path=`cycles/${cycle.id}.json`,bytes=JSON.stringify(cycle)+'\n';await writeFile(join(f.request.directory,path),bytes);
@@ -129,6 +153,6 @@ it.each([false,true])('restores original cycle cache only with a known original 
   await writeFile(join(f.request.directory,path),'{broken');await f.git('add',path);await f.git('commit','--signoff','-m','Damaged cycle cache');
   await f.git('push','--porcelain',f.request.remote,'HEAD:refs/heads/steward/release-state');await f.fetchState();
   const snapshot=await readReleaseRecords({directory:f.request.directory,targetRef:'steward/release-state',repositoryId:f.request.repositoryId});
-  if(missingBudget){await expect(recoverReleaseCaches(f.request,snapshot,{io:f.io})).rejects.toThrow('original native evidence unknown');expect(await f.stateHead()).toBe(snapshot.head);}
+  if(kind!=='terminal'){await expect(recoverReleaseCaches(f.request,snapshot,{io:f.io,now:()=>observedAt})).rejects.toThrow('original native evidence unknown');expect(await f.stateHead()).toBe(snapshot.head);}
   else {const repaired=await recoverReleaseCaches(f.request,snapshot,{io:f.io});expect(repaired.snapshot.cycles[0].value).toEqual(cycle);expect(repaired.snapshot.repository).toEqual(snapshot.repository);expect(await f.git('show',`${repaired.snapshot.head}:${path}`)).toBe(bytes.trim());}
 });

@@ -564,10 +564,13 @@ export async function pipelinePreparePublication(context: EvidenceContext, root:
       if(formal!==null&&release.draft===false)anonymous=await releaseReadIsAnonymous(gh,context.repository,context.repositoryId);
     }
     if (formal === null) {
-      for (const request of cycle.dispatches.filter(value => value.purpose === 'build')) {
-        if (request.canonicalRunId === null) fail('build binding required');
+      const requests = cycle.dispatches.filter(value => value.purpose === 'build');
+      if (!requests.length || requests.some(request => request.canonicalRunId === null))
+        return {status:'WAIT' as const, reason:'BUILD_BINDING_REQUIRED', publishInvoked:false as const};
+      for (const request of requests) {
         const run = verifyExecutionSource(nativeRunFact(await reader.json(`actions/runs/${request.canonicalRunId}`)), { ...context, request });
-        if (run.status !== 'completed' || run.conclusion !== 'success') fail('completed product Run required');
+        if (run.status !== 'completed' || run.conclusion !== 'success')
+          return {status:'WAIT' as const, reason:'BUILD_RUN_NOT_READY', publishInvoked:false as const};
         const pipeline: PipelineSource = { repositoryId: context.repositoryId, fullName: context.repository, sourceSha: cycle.sourceSha,
           controllerSha: cycle.controllerSha, runId: run.id, attempt: run.runAttempt, ref: `refs/heads/${request.ref}`, event: run.event, toolLocks,
           inspectJob: `freeze/${unit.id}`, unit: { id: unit.id, version: unit.version, packageVersion, tag: unit.tag,
