@@ -128,7 +128,7 @@ it.each([false,true])('persists canonical dispatch through real fast-forward com
   expect(readback.cycles[0].value.dispatches[0].canonicalRunId).toBe(100);expect(readback.domainRecords).toHaveLength(3);
   expect(await releaseCommand('dispatch-build',{...f.input,directory:f.remote},{io:f.native.io,now:()=>NOW})).toMatchObject({status:'BOUND'});expect(sends).toBe(1);
 },60_000);
-it('the actual publication bridge adopts private BUSINESS_STARTED bytes before its publisher and blocks a repeated wake',async()=>{
+it('keeps the archived snapshot and Git object directory paired when saving a native Release binding',async()=>{
   const f=await gitFixture(false,native=>Object.assign(native.context.cycle.units[0]!,{manifestDigest:digest('manifest'),notesDigest:digest('notes'),
     assets:[{id:'app',path:'app.zip',size:1,sha256:digest('f')}]}));
   f.native.overrides.set('GET /repos/example/product/releases/tags/v1.0.0',f.native.response({},404));
@@ -144,11 +144,50 @@ it('the actual publication bridge adopts private BUSINESS_STARTED bytes before i
     if(path.endsWith('/jobs?per_page=100'))return f.native.response({total_count:1,jobs:[job]});
     if(path.includes('/actions/runs/900'))return f.native.response(run);throw Error('unexpected central source');
   }};
+  const transport=f.native.io.request;
+  f.native.io.request=async(method,path,limit,body)=>releaseProtectionFixture(path)
+    ?f.native.response(releaseProtectionFixture(path)):transport(method,path,limit,body);
+  let saved=false,saveError:unknown,archivedHead:string|undefined;
+  await inspectReleaseEvidence(f.input,{io:f.native.io,centralIo,centralInvocation:{runId:900,runAttempt:1,controllerSha:sha,defaultBranch:'main'},now:()=>NOW,
+    publisher:async(context:any,save:(next:any)=>Promise<void>)=>{
+      const archived=await readReleaseRecords({directory:f.remote,targetRef:'steward/release-state',repositoryId:1});
+      archivedHead=archived.head;
+      expect(archived.domainRecords.some((record:any)=>record.path.startsWith('evidence/publication/')&&record.value.startEvidencePath===null)).toBe(true);
+      // Sharing the remote object database would mask the stale-directory defect.
+      await expect(f.git('-C',f.input.directory,'cat-file','-e',archived.head)).rejects.toThrow();
+      const next=structuredClone(context.cycle);next.units[0].releaseId=20;
+      try {await save(next);saved=true;} catch(error) {saveError=error;throw error;}
+    }});
+  expect(saveError).toBeUndefined();expect(saved).toBe(true);
+  const readback=await readReleaseRecords({directory:f.remote,targetRef:'steward/release-state',repositoryId:1});
+  expect(readback.cycles[0].value.units[0].releaseId).toBe(20);
+  expect(readback.head).not.toBe(archivedHead);
+  expect(await f.git('-C',f.remote,'merge-base','--is-ancestor',archivedHead!,readback.head)).toBe('');
+},process.platform==='win32'?120_000:60_000);
+it('the actual publication bridge adopts private BUSINESS_STARTED bytes before its publisher and blocks a repeated wake',async()=>{
+  const f=await gitFixture(false,native=>Object.assign(native.context.cycle.units[0]!,{manifestDigest:digest('manifest'),notesDigest:digest('notes'),
+    assets:[{id:'app',path:'app.zip',size:1,sha256:digest('f')}]}));
+  f.native.overrides.set('GET /repos/example/product/releases/tags/v1.0.0',f.native.response({},404));
+  f.native.overrides.set('GET /repos/example/product/releases?per_page=100',f.native.response([]));
+  const sha=f.native.context.cycle.controllerSha,run={id:900,repository:{id:1296724484},head_repository:{id:1296724484},workflow_id:20,path:'.github/workflows/release.yml',event:'schedule',
+    head_sha:sha,head_branch:'main',actor:{id:81},triggering_actor:{id:81},run_attempt:1,status:'in_progress',conclusion:null,created_at:NOW,updated_at:NOW,display_title:'Release'};
+  const job={id:901,run_id:900,run_attempt:1,head_sha:sha,name:'release-coordinator',status:'in_progress',conclusion:null,started_at:NOW,completed_at:null,
+    steps:[{number:3,name:'business-release-coordinator',started_at:NOW,completed_at:null,conclusion:null}]};
+  const centralIo={request:async(method:string,path:string)=>{
+    expect(method).toBe('GET');
+    if(path==='/repos/splrad/steward')return f.native.response({id:1296724484,full_name:'splrad/steward',default_branch:'main',archived:false,disabled:false});
+    if(path.endsWith('/actions/workflows/20'))return f.native.response({id:20,path:run.path});
+    if(path.includes('/actions/runs/999'))return path.endsWith('/jobs?per_page=100')
+      ?f.native.response({total_count:1,jobs:[{...job,id:902,run_id:999,status:'in_progress',conclusion:null,completed_at:null,steps:job.steps.map(step=>({...step,completed_at:null,conclusion:null}))}]})
+      :f.native.response({...run,id:999,status:'in_progress',conclusion:null});
+    if(path.endsWith('/jobs?per_page=100'))return f.native.response({total_count:1,jobs:[job]});
+    if(path.includes('/actions/runs/900'))return f.native.response(run);throw Error('unexpected central source');
+  }};
   let invoked=0;
   const options={io:f.native.io,centralIo,centralInvocation:{runId:900,runAttempt:1,controllerSha:sha,defaultBranch:'main'},now:()=>NOW,publisher:async()=>{
     const readback=await readReleaseRecords({directory:f.remote,targetRef:'steward/release-state',repositoryId:1});
     const start=readback.domainRecords.find((record:any)=>record.path.startsWith('evidence/publication/')&&record.value.startEvidencePath===null);
-    expect(start.value.execution).toMatchObject({businessStartedProven:true,outcome:null,runId:900,runAttempt:1});invoked++;throw Error('lost publication response');
+    expect(start.value.execution).toMatchObject({businessStartedProven:true,outcome:null,runAttempt:1});invoked++;throw Error('lost publication response');
   }};
   const first=await releaseCommand('publish',f.input,options);expect(first.publishInvoked).toBe(true);expect(invoked).toBe(1);
   const second=await releaseCommand('publish',{...f.input,directory:f.remote},options);expect(second).toMatchObject({status:'WAIT',reason:'RUN_IN_FLIGHT',publishInvoked:false});expect(invoked).toBe(1);
@@ -163,7 +202,10 @@ it('the actual publication bridge adopts private BUSINESS_STARTED bytes before i
   Object.assign(run,{status:'completed',conclusion:'failure'});Object.assign(job,{status:'completed',conclusion:'failure',completed_at:NOW});
   Object.assign(job.steps[0]!,{conclusion:'failure',completed_at:NOW});
   const failed=await releaseCommand('publish',{...f.input,directory:f.remote},{...options,centralInvocation:{...options.centralInvocation,runId:999}});
-  expect(failed,JSON.stringify(failed)).toMatchObject({status:'BLOCKED',reason:'NATIVE_MAINTENANCE_REQUIRED',publishInvoked:false});expect(invoked).toBe(1);
+  expect(failed,JSON.stringify(failed)).toMatchObject({publishInvoked:true});expect(invoked).toBe(2);
+  const resumed=await readReleaseRecords({directory:f.remote,targetRef:'steward/release-state',repositoryId:1});
+  expect(resumed.domainRecords.some((record:any)=>record.path.startsWith('evidence/publication/')&&record.value.execution.runId===900&&record.value.execution.outcome==='BUSINESS_FAILED')).toBe(true);
+  expect(resumed.domainRecords.filter((record:any)=>record.path.startsWith('evidence/publication/')&&record.value.startEvidencePath===null)).toHaveLength(2);
 
 // This fixture performs multiple isolated Git publications and complete history
 // readbacks. Windows process startup alone approached 60s in prior full runs.

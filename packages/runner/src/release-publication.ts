@@ -44,12 +44,25 @@ async function centralAttempt(io:EvidenceTransport,id:number,attempt:number,expe
 async function objects(context:EvidenceContext,io:EvidenceTransport):Promise<NativePublication['objects']> {
   const reader=new NativeEvidenceReader(io,context.repository),result:NativePublication['objects']=[];
   for(const unit of context.cycle.units) {
-    const path=unit.releaseId===null?`releases/tags/${encodeURIComponent(unit.tag)}`:`releases/${unit.releaseId}`;
+    let path=unit.releaseId===null?`releases/tags/${encodeURIComponent(unit.tag)}`:`releases/${unit.releaseId}`;
     const proof:NativePublication['objects'][number]={unitId:unit.id,releaseId:null,status:'UNKNOWN',digest:null,sourceUrl:`https://api.github.com${reader.path(path)}`};
     try {
-      const release=await reader.json(path);proof.releaseId=release.id;
+      let release,discoveredDraft=false;
+      try {release=await reader.json(path);}catch(error) {
+        if(!(error instanceof EvidenceReadError)||error.status!==404||unit.releaseId!==null)throw error;
+        // The tag endpoint exposes published releases; recover an existing draft by its native ID.
+        const matches=(await reader.pages('releases','')).filter(value=>value.tag_name===unit.tag);
+        if(!matches.length){proof.status='ABSENT';result.push(proof);continue;}
+        check(matches.length===1&&Number.isSafeInteger(matches[0].id)&&matches[0].id>0,'ambiguous release identity');
+        path=`releases/${matches[0].id}`;release=await reader.json(path);discoveredDraft=true;
+        check(release.id===matches[0].id,'discovered release identity');
+      }
+      proof.releaseId=release.id;proof.sourceUrl=`https://api.github.com${reader.path(path)}`;
+      const marker=`<!-- steward-release:${hash(JSON.stringify([context.repositoryId,unit.id,unit.tag,context.cycle.sourceSha,unit.manifestDigest]))} -->`;
       check(Number.isSafeInteger(release.id)&&release.id>0&&release.tag_name===unit.tag&&release.author?.id===context.appBotId
-        &&(unit.releaseId===null||release.id===unit.releaseId)&&typeof release.body==='string'&&hash(release.body)===unit.notesDigest,'release identity');
+        &&(unit.releaseId===null||release.id===unit.releaseId)&&typeof release.draft==='boolean'&&typeof release.body==='string'
+        &&(hash(release.body)===unit.notesDigest||release.draft&&release.body===marker)
+        &&(!release.draft||release.target_commitish===context.cycle.sourceSha),'release identity');
       check((await reader.json(`commits/${encodeURIComponent(unit.tag)}`)).sha===context.cycle.sourceSha,'tag source');
       const assetReader=release.draft===false?await formalReleaseReader(context,io):reader;
       check(same(stableReleaseFacts(release),stableReleaseFacts(await assetReader.json(path))),'release visibility changed');
@@ -61,6 +74,7 @@ async function objects(context:EvidenceContext,io:EvidenceTransport):Promise<Nat
       }
       check(new Set(assets.map(asset=>asset.name)).size===assets.length,'duplicate release asset');
       check(same(stableReleaseFacts(release),stableReleaseFacts(await assetReader.json(path)))&&same(stableAssetFacts(assets),stableAssetFacts(await assetReader.pages(`releases/${release.id}/assets`,''))),'release changed');
+      if(discoveredDraft)check(same((await reader.pages('releases','')).filter(value=>value.tag_name===unit.tag).map(value=>value.id),[release.id]),'release inventory changed');
       proof.digest=hash(JSON.stringify([stableReleaseFacts(release),bytes.sort((a,b)=>Number(a[0])-Number(b[0]))]));
       proof.status=release.draft===false&&release.immutable===true&&assets.length===unit.assets.length?'MATCH':'ABSENT';
     }catch(error) {

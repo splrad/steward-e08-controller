@@ -53,9 +53,9 @@
     },
     {
       "file": "packages/runner/src/release-publication.js",
-      "sourceSha256": "302dcb7ad7365569d0218fea916f2a414909f295f7ec011517641bcdaed8dcbc",
-      "compiledBeforeSha256": "cd4303c919eb3d5156d37df643a691d15613e5e886efc06ea2bf4cd3cec0028e",
-      "compiledAfterSha256": "1ba2993f4ef38977ff1716665b00c646cc0c084d782680181b11a56ca9431a8e",
+      "sourceSha256": "979afba0c07b18f0f2cacd6ed21607d2b7f4c4ceda036ce04a2ebdc7284f2343",
+      "compiledBeforeSha256": "665860c01150650c905cdb84e57c0164cadf3754248022a85b9b0100acce23fb",
+      "compiledAfterSha256": "98e00d393266d45104d49f81fa0c405d8690f0ca1088a0ab48417f605d4a6524",
       "replacements": [
         {
           "from": "splrad/steward",
@@ -131,8 +131,8 @@
     },
     {
       "name": "index.js",
-      "bytes": 2111677,
-      "sha256": "25c2110c5ba9df4e7eb805eac58e785a85d30bd25bbee1d0401b415fb7ad5b25"
+      "bytes": 2112734,
+      "sha256": "d652f7bc63b51660ff213e9c409a2a3a3ab54dbd6985d380bcf131420d6eda36"
     },
     {
       "name": "package.json",

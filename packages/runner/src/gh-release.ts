@@ -121,7 +121,11 @@ export class NativeGitHubRelease {
       if (!releases.length) { if (failure) throw failure; reject('draft not observed'); }
     }
     releases.sort((a, b) => a.id - b.id);
-    for (const release of releases) await this.read({ ...target, releaseId: release.id });
+    for (const release of releases) {
+      const actual = await this.read({ ...target, releaseId: release.id });
+      if (actual.draft && (actual.target_commitish !== m.sourceSha
+        || actual.body !== marker && actual.body !== await readFile(join(target.directory, 'release-notes.md'), 'utf8'))) reject('draft contains unproven data');
+    }
     if (releases.length > 1) {
       for (const release of releases) if (!release.draft || release.body !== marker || release.target_commitish !== m.sourceSha
         || (await this.assets({ ...target, releaseId: release.id })).length) reject('duplicate release contains unproven data');

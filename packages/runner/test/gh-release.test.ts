@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import type { ProductReleaseManifest } from '../src/release-artifacts.js';
@@ -15,9 +16,27 @@ it('recovers half-uploaded seven-file release and lost upload/body/publication r
   expect(f.calls.find(args => args[0] === 'attestation')).toEqual(expect.arrayContaining(['--source-ref', (f.target.manifest as ProductReleaseManifest).buildRef,
     '--signer-workflow', 'fixture/product/.github/workflows/steward-release-publish.yml', '--signer-digest', f.target.manifest.sourceSha]));
 });
+it.each([[false,'marker'],[true,'marker'],[false,'notes'],[true,'notes']] as const)('adopts an existing draft without creating another release; partial=%s body=%s',async(partial,body)=>{
+  const f=await fixture();if(partial)f.put('app.exe',Buffer.from('app'));
+  const m=f.target.manifest,manifestDigest=createHash('sha256').update(await readFile(join(f.target.directory,'artifact-manifest.json'))).digest('hex');
+  f.release.body=body==='notes'?await readFile(join(f.target.directory,'release-notes.md'),'utf8')
+    :`<!-- steward-release:${createHash('sha256').update(JSON.stringify([m.repositoryId,m.unitId,m.tag,m.sourceSha,manifestDigest])).digest('hex')} -->`;
+  const target=await f.adapter.ensureDraft({...f.target,releaseId:null});
+  expect(target.releaseId).toBe(20);expect(writes(f)).toHaveLength(0);
+  expect((await f.adapter.publish(target)).mode).toBe('verified');
+  expect([...f.releases.keys()]).toEqual([20]);expect(f.remote.size).toBe(7);
+  expect(writes(f).some(args=>args.includes('repos/fixture/product/releases'))).toBe(false);
+});
+it.each(['body','target'] as const)('rejects an unbound draft with conflicting %s before any write',async kind=>{
+  const f=await fixture();f.release.body=await readFile(join(f.target.directory,'release-notes.md'),'utf8');
+  if(kind==='body')f.release.body='unexpected manually edited draft';else f.release.target_commitish='f'.repeat(40);
+  await expect(f.adapter.ensureDraft({...f.target,releaseId:null})).rejects.toThrow('draft contains unproven data');
+  expect(writes(f)).toHaveLength(0);expect([...f.releases.keys()]).toEqual([20]);
+});
 it('published reentry is entirely read-only', async () => {
   const f = await fixture(); await f.preload(); Object.assign(f.release, { draft: false, immutable: true, body: await readFile(join(f.target.directory,'release-notes.md'),'utf8') });
-  await f.adapter.publish(f.target); expect(writes(f)).toHaveLength(0);
+  const target=await f.adapter.ensureDraft({...f.target,releaseId:null});
+  await f.adapter.publish(target); expect(writes(f)).toHaveLength(0);
 });
 it('verifies every private formal asset with authorized reads and preserves the read-only path',async()=>{
   const f=await fixture();f.state.private=true;await f.preload();
