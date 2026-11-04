@@ -78,6 +78,10 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Install locked controller dependencies
+        working-directory: controller
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Closed native inputs
         shell: pwsh
         env:
@@ -128,6 +132,10 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Install locked controller dependencies
+        working-directory: controller
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Closed native inputs
         shell: pwsh
         env:
@@ -201,6 +209,10 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Install locked controller dependencies
+        working-directory: controller
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Closed native inputs
         shell: pwsh
         env:
@@ -339,6 +351,10 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Install locked controller dependencies
+        working-directory: controller
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Closed native inputs
         shell: pwsh
         env:
@@ -488,6 +504,10 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Install locked controller dependencies
+        working-directory: controller
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Closed native inputs
         shell: pwsh
         env:
@@ -651,6 +671,10 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Install locked controller dependencies
+        working-directory: controller
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Closed native inputs
         shell: pwsh
         env:
@@ -1019,6 +1043,10 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Install locked controller dependencies
+        working-directory: controller
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Closed native inputs
         shell: pwsh
         env:
@@ -1177,6 +1205,10 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
+      - name: Install locked controller dependencies
+        working-directory: controller
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Closed native inputs
         shell: pwsh
         env:
