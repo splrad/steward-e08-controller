@@ -62,10 +62,6 @@ jobs:
           cache: false
           env: false
           persist_github_token: false
-      - name: Install locked controller dependencies
-        working-directory: controller
-        shell: pwsh
-        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Activate trusted controller tool paths
         working-directory: controller
         shell: pwsh
@@ -76,6 +72,10 @@ jobs:
           $toolPaths = mise bin-paths
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $toolPaths | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Install locked controller dependencies
+        working-directory: controller
+        shell: pwsh
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Install locked native metadata reader
         shell: pwsh
         run: |
