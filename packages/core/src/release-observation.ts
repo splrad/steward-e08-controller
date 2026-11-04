@@ -1,5 +1,4 @@
 import { decodeSettingsReport } from './settings-report.js';
-import { withinNativeJobWindow } from './native-job-origins.js';
 import { decodeMaintenanceRecord } from './maintenance.js';
 import { decodePagesMaintenance } from './pages-maintenance.js';
 import { decodeCompletionArchive } from './release-history.js';
@@ -38,7 +37,7 @@ interface RepositoryFields {
   repositoryId: number; defaultBranch: string; revision: number;
   lastObservedDefaultSha: string | null; lastCompletedCycleId: string | null; activeCycleId: string | null;
   candidate: null | { id: string; prNumber: number | null; branch: string; baseSha: string; generatedSnapshotPath: string | null;
-    publishedHead: string | null; editingAckHead: string | null; statusCommentId: number | null; contentGenerationDigest: string;
+    publishedHead: string | null; editingAckHead?: string | null; statusCommentId: number | null; contentGenerationDigest: string;
     adoptionOverride: object | null; observedLabelEventIds: number[]; pendingWrite: object | null };
   nextCheckAt: string | null; lastProgressAt: string | null; lastErrorCode: string | null;
 }
@@ -117,7 +116,13 @@ export function parseReleaseRecord<K extends keyof RecordKinds>(kind: K, value: 
       }
       for (const window of request.searchWindows) if (time(window.end) < time(window.start) || time(window.observedAt) < time(window.end)) fail('search window');
     }
-    if (record.repairOf === record.id || (record.repairOf === null) !== (record.approvedRepairDecision === null)) fail('repair identity');
+    const decision = record.approvedRepairDecision;
+    // A cycle first carries the decision that admitted it. If that repair also
+    // fails, its own newly verified decision is retained here; the admission
+    // edge remains recoverable from the protected cycle history.
+    if (record.repairOf === record.id || record.repairOf !== null && decision === null
+      || decision !== null && decision.cycleId !== record.id && decision.cycleId !== record.repairOf
+      || decision?.cycleId === record.id && decision.sourceSha !== record.sourceSha) fail('repair identity');
   }
   if (kind === 'executionEvidence') {
     const record = value as ExecutionEvidence;
@@ -272,111 +277,6 @@ export interface NativeRunCoverage {
 }
 export interface NativeAttemptSet { complete: boolean; runs: NativeRunCoverage[]; attempts: NativeAttemptEvidence[] }
 export interface ArchivedAttempt { stateCommit: string; rawDigest: string; attempt: NativeAttemptEvidence }
-export interface CurrentInvocation {
-  repositoryId: number; cycleId: string; sourceSha: string; expectedRunIds: number[];
-  currentWave: NativeWaveIdentity | null;
-}
-/** Derived observations only. No round counter, permission, job selection or next action. */
-export async function deriveFailureBudget(nativeAttempts: NativeAttemptSet, archivedEvidence: ArchivedAttempt[], currentInvocation: CurrentInvocation) {
-  const [native, archives, context] = structuredClone([nativeAttempts, archivedEvidence, currentInvocation]) as [NativeAttemptSet, ArchivedAttempt[], CurrentInvocation];
-  exact(native, ['complete','runs','attempts']); exact(context, ['repositoryId','cycleId','sourceSha','expectedRunIds','currentWave']);
-  if (!integer(context.repositoryId) || !sha(context.sourceSha) || typeof native.complete !== 'boolean'
-    || !Array.isArray(context.expectedRunIds) || !context.expectedRunIds.every(integer) || !unique(context.expectedRunIds)
-    || !Array.isArray(native.runs) || !Array.isArray(native.attempts) || !Array.isArray(archives)) fail('budget input');
-  const unknown = new Set<string>(), conflicts = new Set<string>(), failed = new Set<string>(), inFlight = new Set<string>();
-  if (!native.complete) unknown.add('run-inventory-incomplete');
-  if (!new RegExp(`^pr-[1-9][0-9]*-${context.sourceSha}$`).test(context.cycleId)) fail('cycle source');
-  if (!unique(native.runs.map(run => run.runId))) fail('duplicate run inventory');
-  const currentKey = context.currentWave ? await nativeWaveKey(context.currentWave) : null;
-  let currentObserved = currentKey === null;
-  if (context.currentWave && (context.currentWave.repositoryId !== context.repositoryId || context.currentWave.cycleId !== context.cycleId)) fail('current invocation identity');
-  if (native.runs.some(run => !context.expectedRunIds.includes(run.runId))) conflicts.add('unexpected-run');
-  if (native.attempts.some(item=>!context.expectedRunIds.includes(item.runId))) conflicts.add('unexpected-attempt');
-  for (const runId of context.expectedRunIds) {
-    const run = native.runs.find(item => item.runId === runId);
-    if (!run) { unknown.add(`run:${runId}:missing`); continue; }
-    exact(run,['runId','workflowId','entry','sourceSha','inputDigest','actorId','latestAttempt','availability']);
-    if (!integer(run.latestAttempt) || !integer(run.workflowId) || !integer(run.actorId) || !sha(run.sourceSha) || !digest(run.inputDigest)
-      || !['build','channel','publish'].includes(run.entry) || !['live','expired','unavailable'].includes(run.availability)) fail('native run coverage');
-    if (run.sourceSha !== context.sourceSha) { conflicts.add(`run:${runId}:source`); continue; }
-    let observations: NativeAttemptEvidence[];
-    if (run.availability === 'unavailable') { unknown.add(`run:${runId}:unavailable`); observations = native.attempts.filter(item => item.runId === runId); }
-    else if (run.availability === 'expired') {
-      observations = [];
-      for (const archive of archives.filter(item => item.attempt.runId === runId)) {
-        exact(archive,['stateCommit','rawDigest','attempt']);
-        if (!sha(archive.stateCommit) || archive.rawDigest !== await sha256Hex(JSON.stringify(archive.attempt))) { conflicts.add(`run:${runId}:archive-digest`); continue; }
-        observations.push(archive.attempt);
-      }
-    } else observations = native.attempts.filter(item => item.runId === runId);
-    const numbers = [...new Set(observations.map(item => item.runAttempt))].sort((a,b) => a-b);
-    if (numbers.length !== run.latestAttempt || numbers.some((n,i) => n !== i+1)) unknown.add(`run:${runId}:attempt-coverage`);
-    for (const attemptNumber of numbers) {
-      const versions = observations.filter(item => item.runAttempt === attemptNumber).sort((a,b) => time(a.observedAt)-time(b.observedAt));
-      const item = versions.at(-1)!;
-      for (const observation of versions) exact(observation,['repositoryId','cycleId','workflowId','runId','runAttempt','entry','sourceSha','inputDigest','executorControllerSha','actorId','status','observedAt','jobsComplete','jobs','invocations','sourceUrl','evidenceDigest']);
-      const key = await nativeWaveKey(item);
-      if (key === currentKey) currentObserved = true;
-      if (versions.some((value,i)=>i>0 && time(value.observedAt)===time(versions[i-1]!.observedAt) && stable(value)!==stable(versions[i-1]))) conflicts.add(`${key}:ambiguous-observation`);
-      const identity = (item: NativeAttemptEvidence) => JSON.stringify([item.repositoryId,item.cycleId,item.workflowId,item.runId,item.runAttempt,item.entry,item.sourceSha,item.inputDigest,item.executorControllerSha,item.actorId]);
-      if (new Set(versions.map(identity)).size !== 1) conflicts.add(`${key}:immutable-identity`);
-      if (item.repositoryId !== context.repositoryId || item.cycleId !== context.cycleId || item.workflowId !== run.workflowId
-        || item.entry !== run.entry || item.sourceSha !== run.sourceSha || item.inputDigest !== run.inputDigest || item.actorId !== run.actorId
-        || !sha(item.executorControllerSha) || !digest(item.evidenceDigest) || !/^https:\/\/[^\s]+$/.test(item.sourceUrl)
-        || item.runAttempt > run.latestAttempt) { conflicts.add(`${key}:native-identity`); continue; }
-      if (typeof item.jobsComplete !== 'boolean') fail('native jobs completeness');
-      if (!item.jobsComplete) unknown.add(`${key}:jobs-incomplete`);
-      if (!Array.isArray(item.jobs) || !Array.isArray(item.invocations) || !unique(item.jobs.map(job => job.id))
-        || item.jobs.some(job => !integer(job.id) || !Array.isArray(job.steps) || !unique(job.steps.map(step => step.number)))) fail('native jobs');
-      for (const job of item.jobs) {
-        exact(job,['id','steps']);
-        for (const step of job.steps) {
-          exact(step,['number','name','startedAt','completedAt','conclusion']);
-          if (!integer(step.number) || typeof step.name !== 'string' || !step.name || step.conclusion !== null && typeof step.conclusion !== 'string') fail('native step');
-          if (step.startedAt !== null) time(step.startedAt);
-          if (step.completedAt !== null && (step.startedAt === null || time(step.completedAt)<time(step.startedAt))) fail('native step chronology');
-        }
-      }
-      for (const invocation of item.invocations) {
-        exact(invocation,['evidence','jobId','stepNumber']);
-        if (!integer(invocation.jobId) || !integer(invocation.stepNumber)) fail('native invocation');
-      }
-      if (item.status !== 'completed') {
-        if (!['requested','queued','pending','waiting','in_progress'].includes(item.status)) fail('native status');
-        if (key !== currentKey) inFlight.add(key);
-        continue;
-      }
-      const businessSteps = item.jobs.flatMap(job => job.steps.filter(step => step.name.startsWith('business-')).map(step => ({jobId:job.id,step})));
-      if (!unique(item.invocations.map(record => record.evidence.invocationKey))) fail('duplicate invocation');
-      for (const { jobId, step } of businessSteps) {
-        if (step.startedAt && step.conclusion !== 'skipped' && !item.invocations.some(inv => inv.jobId === jobId && inv.stepNumber === step.number)) unknown.add(`${key}:step:${jobId}:${step.number}:missing-result`);
-      }
-      for (const invocation of item.invocations) {
-        const evidence = parseReleaseRecord('executionEvidence', invocation.evidence);
-        const step = item.jobs.find(job => job.id === invocation.jobId)?.steps.find(step => step.number === invocation.stepNumber);
-        if (!step || step.conclusion === 'skipped' || !step.name.startsWith('business-') || evidence.jobId !== invocation.jobId && !(item.entry === 'publish' && evidence.jobId === null)
-          || await nativeWaveKey(evidence) !== key || evidence.inputDigest !== item.inputDigest
-          || time(evidence.observedAt) > time(item.observedAt)) { conflicts.add(`${key}:invocation-source`); continue; }
-        if (evidence.businessStartedProven && (!step.startedAt || !withinNativeJobWindow(evidence.startedAt,step.startedAt,step.completedAt))) { conflicts.add(`${key}:start-marker`); continue; }
-        const outcome = evidence.outcome;
-        if (outcome === 'FACT_CONFLICT') { conflicts.add(`${key}:${evidence.invocationKey}:object-conflict`); continue; }
-        if (outcome === null || outcome === 'UNKNOWN') { unknown.add(`${key}:${evidence.invocationKey}:outcome`); continue; }
-        if (outcome === 'WAIT' || outcome === 'REJECTED_BEFORE_BUSINESS') {
-          if (evidence.businessStartedProven) unknown.add(`${key}:${evidence.invocationKey}:started-without-result`);
-          continue;
-        }
-        if (outcome === 'BUSINESS_FAILED' && !evidence.businessStartedProven || !evidence.completedAt || !evidence.objectEvidencePaths.length) {
-          unknown.add(`${key}:${evidence.invocationKey}:missing-business-proof`); continue;
-        }
-        if (outcome === 'BUSINESS_FAILED') failed.add(key);
-      }
-    }
-  }
-  if (!currentObserved) unknown.add('current-wave-not-observed');
-  return { failedWaveKeys: [...failed].sort(), remaining: unknown.size || conflicts.size ? null : Math.max(0, 3-failed.size),
-    unknownEvidence: [...unknown].sort(), conflictEvidence: [...conflicts].sort(), inFlightWaveKeys: [...inFlight].sort() };
-}
-
 export type CompletionTruth = 'PASS' | 'WAIT' | 'UNKNOWN' | 'CONFLICT';
 export interface CompletionSource {
   repositoryId: number; cycleId: string; sourceSha: string; deliveryConfigSha: string;
@@ -484,6 +384,9 @@ export function evaluateCompletion(expected: CompletionSource, observation: Comp
   }
   for (const key of facts.inFlightWaveKeys) add(key,'WAIT','business-in-flight');
   for (const key of facts.unknownWriteKeys) add(key,'UNKNOWN','unknown-write');
-  const result:CompletionTruth = reasons.some(item=>item.result==='CONFLICT')?'CONFLICT':reasons.some(item=>item.result==='UNKNOWN')?'UNKNOWN':reasons.some(item=>item.result==='WAIT')?'WAIT':'PASS';
-  return {result,reasons};
+  const mainReasons = reasons.filter(item => !item.key.startsWith('channel:'));
+  const channelReasons = reasons.filter(item => item.key.startsWith('channel:'));
+  const result:CompletionTruth = mainReasons.some(item=>item.result==='CONFLICT')?'CONFLICT':mainReasons.some(item=>item.result==='UNKNOWN')?'UNKNOWN':mainReasons.some(item=>item.result==='WAIT')?'WAIT':'PASS';
+  const distributionResult:CompletionTruth = channelReasons.some(item=>item.result==='CONFLICT')?'CONFLICT':channelReasons.some(item=>item.result==='UNKNOWN')?'UNKNOWN':channelReasons.some(item=>item.result==='WAIT')?'WAIT':'PASS';
+  return {result,distributionResult,reasons};
 }

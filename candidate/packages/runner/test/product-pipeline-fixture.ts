@@ -17,7 +17,9 @@ export function productPipelineFixture(attempts = 1, twoUnits = false) {
     '.release-please-manifest.json': '{".":"1.0.0"}', VERSION: '1.0.0\n', 'global.json': '{}',
     '.github/release-template.md.mustache': readFileSync('templates/repository/.github/release-template.md.mustache', 'utf8') };
   if (twoUnits) {
+    delivery.units[0]!.path='packages/app';
     delivery.units.push({ ...structuredClone(delivery.units[0]!), id: 'other', path: 'packages/other', notesPath: '.release-notes/other.md' });
+    delivery.units[1]!.assets[0]!.name='other-${version}.exe';
     workflow.jobs.build.strategy.matrix.include.push({ unit: 'other', target: 'windows-x64', assets: ['app'] });
     f.context.cycle.units[0]!.tag = 'app-v1.0.0';
     f.context.cycle.units.push({ ...structuredClone(f.context.cycle.units[0]!), id: 'other', tag: 'other-v1.0.0' });
@@ -25,7 +27,8 @@ export function productPipelineFixture(attempts = 1, twoUnits = false) {
     source['.github/workflows/steward-release-publish.yml'] = YAML.stringify(workflow);
     source['release-please-config.json'] = JSON.stringify({ 'include-component-in-tag': true, 'include-v-in-tag': true,
       packages: Object.fromEntries(delivery.units.map(unit => [unit.path, { 'release-type': 'simple', 'version-file': 'VERSION', component: unit.id }])) });
-    source['.release-please-manifest.json'] = '{".":"1.0.0","packages/other":"1.0.0"}'; source['packages/other/VERSION'] = '1.0.0\n';
+    source['.release-please-manifest.json'] = '{"packages/app":"1.0.0","packages/other":"1.0.0"}';
+    source['packages/app/VERSION'] = source['packages/other/VERSION'] = '1.0.0\n';
   }
   const bytes = Buffer.from(source['.github/delivery.json']!);
   f.context.cycle.deliveryConfigSha = createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');

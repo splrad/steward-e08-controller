@@ -48,25 +48,21 @@ export async function generateCandidate(B: string, rpConfig: CandidateGenerator)
   const github = readOnlyReleasePlease(await rpConfig.createReadClient());
   const previousManifest = JSON.parse(before.manifest) as Record<string, string>;
   const firstLayerScape = github.repository.owner === 'splrad' && github.repository.repo === 'LayerScape'
-    && (!Object.hasOwn(previousManifest, '.') || before.boundaries.some(boundary => boundary.kind === 'full-tree'));
+    && (!Object.hasOwn(previousManifest, '.') || previousManifest['.'] === '0.0.0'
+      || before.boundaries.some(boundary => boundary.kind === 'full-tree'));
   if (firstLayerScape && (before.releases.length || before.tags.length || Object.keys(previousManifest).length
     || (config.packages as Record<string, Record<string, unknown>>)?.['.']?.['initial-version'] !== '1.0.0'
     || ['bootstrap-sha', 'draft', 'force-tag-creation'].some(key => Object.hasOwn(config, key)
       || Object.hasOwn((config.packages as Record<string, Record<string, unknown>>)?.['.'] ?? {}, key))
     || before.boundaries.some(boundary => boundary.kind !== 'full-tree'))) throw new Error('CANDIDATE_FIRST_RELEASE_INPUT');
-  const visited = new Set<string>(), iterator = github.mergeCommitIterator.bind(github);
-  github.mergeCommitIterator = async function* (branch, options) {
-    for await (const commit of iterator(branch, options)) { visited.add(commit.sha); yield commit; }
-  };
   if (github.repository.defaultBranch !== before.defaultBranch) throw new Error('CANDIDATE_DEFAULT_BRANCH_DRIFT');
+  const baseline = before.boundaries.every(b => b.kind === 'baseline' && b.sha === before.boundaries[0]?.sha) ? before.boundaries[0]?.sha : null;
   const manifest = await Manifest.fromManifest(github, before.defaultBranch, rpConfig.configPath, rpConfig.manifestPath,
-    { releaseSearchDepth: before.releases.length + 1, commitSearchDepth: before.commitCount + 1, separatePullRequests: false });
+    { releaseSearchDepth: before.releases.length + 1, commitSearchDepth: before.commitCount + 1, separatePullRequests: false, ...(baseline ? { bootstrapSha: baseline } : {}) });
   const paths = Object.keys(manifest.repositoryConfig).sort();
   if (JSON.stringify(paths) !== JSON.stringify(rpConfig.units.map(u => u.path).sort())
     || JSON.stringify(paths) !== JSON.stringify(before.boundaries.map(b => b.path).sort())) throw new Error('CANDIDATE_UNIT_COVERAGE');
   const candidates = await manifest.buildPullRequests();
-  if (!visited.has(B) || before.boundaries.some(b => b.kind !== 'full-tree' && !visited.has(b.sha!))
-    || before.boundaries.some(b => b.kind === 'full-tree') && visited.size !== before.commitCount) throw new Error('CANDIDATE_COMMIT_COVERAGE');
   if (candidates.length > 1) throw new Error('CANDIDATE_MULTIPLE_PRS');
   const candidate = candidates[0];
   if (!candidate) {
@@ -131,7 +127,7 @@ export interface CandidateMerge {
   status: 'READY' | 'CONFLICT'; files: CandidateFile[]; conflictPaths: string[];
   adoption: null | { humanHead: string; generatedBase: string; differences: CandidateFile[] };
 }
-/** G is the last pure generator output; H is the complete current PR commit, N the new output. */
+/** Compare the current PR with the previous generated files; stop on human differences. */
 export async function mergeCandidate(workspace: string, G: CandidateSnapshot | null, H: string, N: CandidateSnapshot, temporaryRoot = tmpdir()): Promise<CandidateMerge> {
   sha(H); sha(N.baseSha); validateCandidateFiles(N.files); if (G) validateCandidateFiles(G.files);
   const directory = await mkdtemp(join(temporaryRoot, 'steward-candidate-merge-'));
@@ -150,7 +146,7 @@ export async function mergeCandidate(workspace: string, G: CandidateSnapshot | n
       if (content.includes('\0')) throw new Error('CANDIDATE_BINARY_TEXT');
       return { ...entry, content, mode: entry.mode as CandidateFile['mode'] };
     };
-    const conflicts: string[] = [], files: CandidateFile[] = [], differences: CandidateFile[] = [];
+    const conflicts: string[] = [], files: CandidateFile[] = [];
     // Any human code outside the generator's exact output must already be present in B.
     for (const path of new Set([...human.keys(), ...oldBase.keys()])) {
       if (!managed.has(path) && !sameObject(human.get(path), oldBase.get(path)) && !sameObject(human.get(path), base.get(path))) conflicts.push(path);
@@ -164,37 +160,11 @@ export async function mergeCandidate(workspace: string, G: CandidateSnapshot | n
       if (equal(actual, desired)) { if (desired) files.push(desired); continue; }
       if (equal(actual, old)) { files.push(desired ?? { path, mode: old?.mode ?? '100644', content: null }); continue; }
       if (equal(actual, await read(base.get(path)))) { files.push(desired ?? { path, mode: actual?.mode ?? '100644', content: null }); continue; }
-      const notes = /^\.release-notes\/[A-Za-z0-9][A-Za-z0-9._-]*\.md$/.test(path);
-      if (!notes) { conflicts.push(path); continue; }
-      if (!G) {
-        if (actual) {
-          differences.push(actual);
-          const changes = /^## 更新内容\s*\n[\s\S]*?(?=^## |$(?![\s\S]))/m.exec(desired?.content ?? '')?.[0];
-          if (!/^## 更新内容\s*$/m.test(actual.content!) && changes) {
-            const index = actual.content!.search(/^## 兼容性\s*$/m);
-            const content = index >= 0 ? actual.content!.slice(0, index) + changes + '\n' + actual.content!.slice(index) : actual.content + '\n' + changes;
-            files.push({ ...actual, content });
-          } else files.push(actual);
-        }
-        else conflicts.push(path);
-        continue;
-      }
-      // Missing and empty are different. Delete/modify and add/add never silently discard text.
-      if (!actual || !old || !desired || actual.content === null || old.content === null || desired.content === null
-        || actual.mode !== old.mode || desired.mode !== old.mode) { conflicts.push(path); continue; }
-      const paths = ['human.md', 'generated-before.md', 'generated-next.md'].map(p => join(directory, p));
-      await writeFile(paths[0]!, actual.content); await writeFile(paths[1]!, old.content); await writeFile(paths[2]!, desired.content);
-      try {
-        const output = await git(workspace, directory, ['merge-file', '-p', '--diff3', ...paths]);
-        files.push({ path, mode: desired.mode, content: output.toString('utf8') });
-      } catch (error) {
-        const code = (error as { code?: number }).code;
-        if (typeof code !== 'number' || code < 1 || code > 127) throw error;
-        conflicts.push(path);
-      }
+      // A human difference is never merged or replayed over a generated draft.
+      conflicts.push(path);
     }
     return { status: conflicts.length ? 'CONFLICT' : 'READY', files, conflictPaths: [...new Set(conflicts)].sort(),
-      adoption: !G ? { humanHead: H, generatedBase: N.baseSha, differences } : null };
+      adoption: null };
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 

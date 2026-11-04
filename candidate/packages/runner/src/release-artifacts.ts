@@ -53,7 +53,7 @@ export function validateProductManifest(input: unknown): asserts input is Produc
 export async function inspectProductArtifacts(unit: DeliveryUnit, directory: string, input: Omit<ProductReleaseManifest, 'schemaVersion' | 'artifacts' | 'evidence'>, inspect: NativeInspector): Promise<ProductReleaseManifest> {
   unit = structuredClone(unit); input = structuredClone(input);
   if (!input.producers.length || new Set(input.producers.map(item => item.buildId)).size !== input.producers.length
-    || input.producers.some(item => ![item.jobId, item.attempt, item.artifactId].every(value => Number.isSafeInteger(value) && value > 0) || item.attempt > input.attempt)) fail('producer identity');
+    || input.producers.some(item => ![item.jobId, item.runId??input.runId, item.attempt, item.artifactId].every(value => Number.isSafeInteger(value) && value > 0) || (item.runId??input.runId)===input.runId && item.attempt > input.attempt)) fail('producer identity');
   const names = deliveryAssetNames(unit, input.version, input.packageVersion), expected = [...names.values()].sort(), states = new Map<string, Stats>();
   if (input.unitId !== unit.id || JSON.stringify((await readdir(directory)).sort()) !== JSON.stringify(expected)) fail('business asset set mismatch');
   const inspector: NativeVersionInspector = Object.assign(async () => { throw new Error('PATH_INSPECTOR_REQUIRED'); }, { inspectPath: inspect });
@@ -90,7 +90,7 @@ function identity(input: ReleaseIdentity, unit: ReleaseUnit) {
     || !Object.keys(input.toolLocks).length || ![input.runId, input.attempt].every(value => Number.isSafeInteger(value) && value > 0)) fail('invalid identity');
   if (input.producers.length !== unit.builds.length || new Set(input.producers.map(item => item.buildId)).size !== unit.builds.length
     || input.producers.some(item => !unit.builds.some(build => build.id === item.buildId)
-      || ![item.jobId, item.attempt, item.artifactId].every(value => Number.isSafeInteger(value) && value > 0) || item.attempt > input.attempt)) fail('producer identity');
+      || ![item.jobId, item.runId??input.runId, item.attempt, item.artifactId].every(value => Number.isSafeInteger(value) && value > 0) || (item.runId??input.runId)===input.runId && item.attempt > input.attempt)) fail('producer identity');
 }
 export async function inspectReleaseArtifacts(unit: ReleaseUnit, directory: string, input: ReleaseIdentity, inspect: NativeInspector): Promise<ReleaseManifest> {
   unit = structuredClone(unit); input = structuredClone(input);

@@ -23,23 +23,9 @@ it('permits native created-time ranges in queries while rejecting encoded path t
     await expect(io.request('GET',bad)).rejects.toThrow('API path');
   expect(calls).toHaveLength(1);
 });
-it('reads the exact public native Run page without credentials or redirects and bounds its bytes',async()=>{
-  const calls:{url:string;init:any}[]=[];
-  const io=nativeEvidenceTransport('private-fixture-token',async(url:any,init:any)=>{
-    calls.push({url:String(url),init});return new Response('<html>native</html>',{headers:{'content-type':'text/html; charset=utf-8'}});
-  });
-  expect((await io.readRunPage!('example/product',100)).status).toBe(200);
-  expect(calls[0]!.url).toBe('https://github.com/example/product/actions/runs/100');
-  expect(new Headers(calls[0]!.init.headers).has('authorization')).toBe(false);expect(calls[0]!.init.redirect).toBe('error');
-  for(const repository of ['../product','example/..','example/product?token=x'])await expect(io.readRunPage!(repository,100)).rejects.toThrow('identity');
-  expect(calls).toHaveLength(1);
-  const big=nativeEvidenceTransport(undefined,async()=>new Response('x'.repeat(384*1024+1),{headers:{'content-type':'text/html'}}));
-  await expect(big.readRunPage!('example/product',100)).rejects.toThrow('bound');
-});
-
-it('reads every native attempt and counts actual failures once per wave from original logs',async()=>{
+it('reads original attempt evidence and validates the latest native outcome',async()=>{
   const f=evidenceFixture(2),r=await inspectNativeCycle(f.context,[],f.io,NOW);
-  expect(r.budget).toMatchObject({remaining:1,unknownEvidence:[],conflictEvidence:[]});expect(r.budget.failedWaveKeys).toHaveLength(2);
+  expect(r.currentFacts).toMatchObject({unknownEvidence:[],conflictEvidence:[]});
   expect(r.archives).toHaveLength(2);expect(r.archives[0]!.logs[0]!.digest).toMatch(/^[a-f0-9]{64}$/);
   expect(f.calls.some(call=>call.includes('/attempts/1/jobs'))).toBe(true);expect(f.calls.every(call=>call.startsWith('GET'))).toBe(true);
 });
@@ -47,7 +33,7 @@ it('keeps timestamped skipped business steps out of native result collection and
   const f=evidenceFixture();
   for(const job of f.jobs.get(1)!)for(const step of job.steps)if(step.name.startsWith('business-'))step.conclusion='skipped';
   const result=await inspectNativeCycle(f.context,[],f.io,NOW);
-  expect(result.budget).toMatchObject({remaining:3,failedWaveKeys:[],unknownEvidence:[],conflictEvidence:[]});
+  expect(result.currentFacts).toMatchObject({unknownEvidence:[],conflictEvidence:[]});
   expect(result.native.attempts[0]!.invocations).toEqual([]);
   expect(f.calls.some(call=>call.endsWith('/logs'))).toBe(false);
 });
@@ -58,22 +44,22 @@ it.each(['same-second','next-second'])('uses native second precision for %s rece
   result.execution.observedAt=result.execution.completedAt;
   const actual=await inspectNativeCycle(f.context,[],f.io,NOW);
   if(kind==='same-second'){
-    expect(actual.budget).toMatchObject({remaining:2,unknownEvidence:[],conflictEvidence:[]});
+    expect(actual.currentFacts).toMatchObject({unknownEvidence:[],conflictEvidence:[]});
     expect(actual.native.attempts[0]!.invocations[0]!.evidence.completedAt).toBe(result.execution.completedAt);
-  }else expect(actual.budget.remaining).toBeNull();
+  }else expect(actual.readObservation.disposition).not.toBe('COMPLETE');
 });
 it('keeps raw retained job projections while counting their original business execution only once, including expiry',async()=>{
   const f=evidenceFixture(2);
   f.jobs.set(2,[{...structuredClone(f.jobs.get(1)![0]),id:2000,run_attempt:2}]);
   const result=await inspectNativeCycle(f.context,[],f.io,NOW);
-  expect(result.budget).toMatchObject({remaining:2,unknownEvidence:[],conflictEvidence:[]});
-  expect(result.budget.failedWaveKeys).toHaveLength(1);
+  expect(result.currentFacts).toMatchObject({unknownEvidence:[],conflictEvidence:[]});
+
   expect(result.archives[1]!.jobs[0]!.id).toBe(2000);expect(result.native.attempts[1]!.jobs).toEqual([]);
   expect(f.calls.some(call=>call.includes('/jobs/2000/logs'))).toBe(false);
   const history=result.archives.map(value=>({...archiveFile(value),commit:D,value}));
   f.overrides.set('GET /repos/example/product/actions/runs/100',f.response({},410));
   const expired=await inspectNativeCycle(f.context,history,f.io,NOW);
-  expect(expired.budget).toMatchObject({remaining:2,unknownEvidence:[],conflictEvidence:[]});
+  expect(expired.currentFacts).toMatchObject({unknownEvidence:[],conflictEvidence:[]});
   expect(expired.archived[1]!.attempt.jobs).toEqual([]);
 });
 it('preserves repository ID, original Run, source and budget across rename and visibility changes, including archived native history',async()=>{
@@ -83,11 +69,11 @@ it('preserves repository ID, original Run, source and budget across rename and v
   const io={...f.io,request:async(method:'GET'|'POST',path:string,limit?:number,body?:object)=>f.io.request(method,path.replace('/repos/example/renamed','/repos/example/product'),limit,body)};
   for(const visibility of ['private','public']) {
     f.overrides.set('GET /repos/example/product',f.response({id:1,full_name:'example/renamed',default_branch:'main',archived:false,disabled:false,visibility}));
-    const live=await inspectNativeCycle(f.context,history,io,NOW);expect(live.budget).toEqual(original.budget);
+    const live=await inspectNativeCycle(f.context,history,io,NOW);expect(live.currentFacts).toEqual(original.currentFacts);
   }
   f.overrides.set('GET /repos/example/product/actions/runs/100',f.response({},410));
   const restored=await inspectNativeCycle(f.context,history,io,NOW);
-  expect(restored.budget.failedWaveKeys).toEqual(original.budget.failedWaveKeys);expect(restored.budget.remaining).toBe(1);
+  expect(restored.readObservation.disposition).toBe('COMPLETE');
   expect(JSON.stringify(f.context.cycle)).toBe(before);expect(f.calls.some(x=>x.startsWith('POST'))).toBe(false);
 });
 it.each(['archived','disabled','replacement-id','uninstalled'])('stops %s evidence reads and resumes the original objects after access is restored',async mode=>{
@@ -95,12 +81,12 @@ it.each(['archived','disabled','replacement-id','uninstalled'])('stops %s eviden
   f.overrides.set('GET /repos/example/product',f.response({...repo,archived:mode==='archived',disabled:mode==='disabled',id:mode==='replacement-id'?2:1},mode==='uninstalled'?403:200));
   await expect(inspectNativeCycle(f.context,[],f.io,NOW)).rejects.toThrow();
   expect(f.calls).toEqual(['GET /repos/example/product']);f.overrides.clear();
-  const restored=await inspectNativeCycle(f.context,[],f.io,NOW);expect(restored.budget.remaining).toBe(1);expect(f.request.canonicalRunId).toBe(100);
+  const restored=await inspectNativeCycle(f.context,[],f.io,NOW);expect(restored.readObservation.disposition).toBe('COMPLETE');expect(f.request.canonicalRunId).toBe(100);
   expect(f.calls.some(x=>x.startsWith('POST'))).toBe(false);
 });
 it('accepts the exact producer ZIP when logs have expired and validates the closed payload',async()=>{
   const f=evidenceFixture();f.setLogs(false);f.artifact();const r=await inspectNativeCycle(f.context,[],f.io,NOW);
-  expect(r.budget.remaining).toBe(2);expect(r.archives[0]!.producers[0]!.artifactId).toBe(700);
+  expect(r.readObservation.disposition).toBe('COMPLETE');expect(r.archives[0]!.producers[0]!.artifactId).toBe(700);
   expect(f.calls.some(call=>call.endsWith('/logs'))).toBe(false);
   const file=archiveFile(r.archives[0]!);expect(decodeStateFile('steward/release-state',file.path,Buffer.from(file.content),1)).toEqual(r.archives[0]);
 });
@@ -111,11 +97,11 @@ it.each(['digest','job-window','source','attempt','closed-fields','zip-entry','u
   if(mode==='digest')f.artifacts[0].digest='sha256:'+'0'.repeat(64);
   if(mode==='job-window')f.artifacts[0].created_at='2026-10-28T00:00:00Z';
   if(mode==='zip-entry'){const bytes=zipResult(result,'unexpected.json');f.downloads.set(id,bytes);f.artifacts[0].digest='sha256:'+digest(bytes);f.artifacts[0].size_in_bytes=bytes.length;}
-  const r=await inspectNativeCycle(f.context,[],f.io,NOW);expect(r.budget.remaining).toBeNull();expect(r.budget.failedWaveKeys).toHaveLength(0);
+  const r=await inspectNativeCycle(f.context,[],f.io,NOW);expect(r.readObservation.disposition).not.toBe('COMPLETE');
 });
 it.each([403,404,429,500])('keeps HTTP %i unknown without treating access loss as zero budget or expiration',async status=>{
   const f=evidenceFixture();f.overrides.set('GET /repos/example/product/actions/runs/100',f.response({message:'fixture-secret'},status,{'retry-after':'120'}));
-  const r=await inspectNativeCycle(f.context,[],f.io,NOW);expect(r.budget.remaining).toBeNull();expect(r.errors[0]).toEqual({code:`HTTP_${status}`,retryAfter:'120'});expect(JSON.stringify(r)).not.toContain('fixture-secret');
+  const r=await inspectNativeCycle(f.context,[],f.io,NOW);expect(r.readObservation.disposition).not.toBe('COMPLETE');expect(r.errors[0]).toEqual({code:`HTTP_${status}`,retryAfter:'120'});expect(JSON.stringify(r)).not.toContain('fixture-secret');
 });
 it.each(['actor','fork','head','ref','workflow','request-digest'])('blocks %s mismatch before native rerun',async field=>{
   const f=evidenceFixture();const run=f.runs.get(1);
@@ -125,7 +111,7 @@ it.each(['actor','fork','head','ref','workflow','request-digest'])('blocks %s mi
 });
 it('treats started steps without result/log proof as UNKNOWN',async()=>{
   const f=evidenceFixture();f.setLogs(false);const r=await recoverNativeCycle(f.context,100,f.store,[],f.io,NOW);
-  expect(r.status).toBe('UNKNOWN');expect(r.observation.budget.failedWaveKeys).toHaveLength(0);expect(f.calls.some(call=>call.startsWith('POST'))).toBe(false);
+  expect(r.status).toBe('UNKNOWN');expect(f.calls.some(call=>call.startsWith('POST'))).toBe(false);
 });
 it('archives and reads back before rerun and adopts a lost response by observing the actual native attempt',async()=>{
   const f=evidenceFixture();f.setAccepted();f.setThrowPost();const r=await recoverNativeCycle(f.context,100,f.store,[],f.io,NOW);
@@ -144,7 +130,7 @@ it('compares latest and attempt metadata with their own endpoints while preservi
     return response;
   };
   const result=await recoverNativeCycle(f.context,100,f.store,[],f.io,NOW);
-  expect(result.status).toBe('ACCEPTED');expect(result.observation.archives[0]!.run.updatedAt).toBe('2026-10-26T00:01:00.000Z');
+  expect(result).toMatchObject({status:'BLOCKED',reason:'NATIVE_MAINTENANCE_REQUIRED'});expect(result.observation.archives[0]!.run.updatedAt).toBe('2026-10-26T00:01:00.000Z');
   expect(result.observation.latestRuns[0]!.updatedAt).toBe('2026-10-26T00:00:59.000Z');
   expect(result.observation.archives[1]!.run.createdAt).toBe('2026-10-26T00:00:01.000Z');
   expect(result.observation.latestRuns[0]!.createdAt).toBe('2026-10-26T00:00:00.000Z');
@@ -158,27 +144,27 @@ it('does not invent an attempt or resend within the invocation when a native res
   const f=evidenceFixture();f.setThrowPost();const r=await recoverNativeCycle(f.context,100,f.store,[],f.io,NOW);
   expect(r).toMatchObject({status:'UNKNOWN',reason:'RERUN_NOT_YET_OBSERVED',observedAttempt:1});expect(f.calls.filter(call=>call.startsWith('POST'))).toHaveLength(1);
 });
-it('blocks the fourth business wave after three proved failures across all native attempts',async()=>{
-  const f=evidenceFixture(3);const r=await recoverNativeCycle(f.context,100,f.store,[],f.io,NOW);expect(r).toMatchObject({status:'BLOCKED',reason:'FAILURE_BUDGET_EXHAUSTED'});expect(f.calls.some(call=>call.startsWith('POST'))).toBe(false);
+it('does not automatically rerun an already retried native Run',async()=>{
+  const f=evidenceFixture(3);const r=await recoverNativeCycle(f.context,100,f.store,[],f.io,NOW);expect(r).toMatchObject({status:'BLOCKED',reason:'NATIVE_MAINTENANCE_REQUIRED'});expect(f.calls.some(call=>call.startsWith('POST'))).toBe(false);
 });
 it('retains partial facts but refuses changing runs and incomplete pagination',async()=>{
   const f=evidenceFixture();const path='GET /repos/example/product/actions/runs/100/attempts/1/jobs?per_page=100';
   f.overrides.set(path,f.response({total_count:2,jobs:f.jobs.get(1)}));
-  const r=await inspectNativeCycle(f.context,[],f.io,NOW);expect(r.budget.remaining).toBeNull();expect(r.errors[0]!.code).toContain('incomplete pagination');
+  const r=await inspectNativeCycle(f.context,[],f.io,NOW);expect(r.readObservation.disposition).not.toBe('COMPLETE');expect(r.errors[0]!.code).toContain('incomplete pagination');
 });
 it('follows all official page links and rejects repeated identities',async()=>{
   const f=evidenceFixture();const first='/repos/example/product/actions/runs/100/attempts/1/jobs?per_page=100',second=first+'&page=2';
   const job=f.jobs.get(1)![0],other={...job,id:1001,name:'collect',steps:[]};
   f.overrides.set('GET '+first,f.response({total_count:2,jobs:[job]},200,{link:`<https://api.github.com${second}>; rel="next"`}));
   f.overrides.set('GET '+second,f.response({total_count:2,jobs:[other]}));
-  expect((await inspectNativeCycle(f.context,[],f.io,NOW)).budget.remaining).toBe(2);
-  f.overrides.set('GET '+second,f.response({total_count:2,jobs:[job]}));expect((await inspectNativeCycle(f.context,[],f.io,NOW)).budget.remaining).toBeNull();
+  expect((await inspectNativeCycle(f.context,[],f.io,NOW)).readObservation.disposition).toBe('COMPLETE');
+  f.overrides.set('GET '+second,f.response({total_count:2,jobs:[job]}));expect((await inspectNativeCycle(f.context,[],f.io,NOW)).readObservation.disposition).not.toBe('COMPLETE');
 });
 it('recovers an expired Run from original protected archives and verifies every native identity and digest',async()=>{
   const f=evidenceFixture(2),first=await inspectNativeCycle(f.context,[],f.io,NOW);
   const history=first.archives.map(value=>({path:archiveFile(value).path,commit:D,value}));
   f.overrides.set('GET /repos/example/product/actions/runs/100',f.response({},410));
-  expect((await inspectNativeCycle(f.context,history,f.io,NOW)).budget.remaining).toBe(1);
+  expect((await inspectNativeCycle(f.context,history,f.io,NOW)).readObservation.disposition).toBe('COMPLETE');
   history[0]!.path=history[0]!.path.replace(/\/[^/]+\.json$/,'/'+'0'.repeat(64)+'.json');
   await expect(inspectNativeCycle(f.context,history,f.io,NOW)).rejects.toThrow('archive provenance');
 });
@@ -186,7 +172,7 @@ it('does not use archived success to bypass a live permission failure',async()=>
   const f=evidenceFixture(),first=await inspectNativeCycle(f.context,[],f.io,NOW);
   const history=first.archives.map(value=>({path:archiveFile(value).path,commit:D,value}));
   f.overrides.set('GET /repos/example/product/actions/runs/100',f.response({},403));
-  expect((await inspectNativeCycle(f.context,history,f.io,NOW)).budget.remaining).toBeNull();
+  expect((await inspectNativeCycle(f.context,history,f.io,NOW)).readObservation.disposition).not.toBe('COMPLETE');
 });
 it('keeps another active native wave waiting without rerunning it',async()=>{
   const f=evidenceFixture();f.runs.get(1).status='in_progress';f.runs.get(1).conclusion=null;
@@ -206,33 +192,33 @@ it('uses no token on the signed download origin and rejects cross-origin redirec
 it('keeps business-before rejection at zero failures and lets the App recover the same original Run',async()=>{
   const f=evidenceFixture();f.runs.get(1).triggering_actor.id=99;f.jobs.get(1)![0].steps=[];
   f.setAccepted();const r=await recoverNativeCycle(f.context,100,f.store,[],f.io,NOW);
-  expect(r.status).toBe('ACCEPTED');expect(r.observation.budget.remaining).toBe(3);
+  expect(r.status).toBe('ACCEPTED');expect(r.observation.readObservation.disposition).toBe('COMPLETE');
 });
 it('never accepts a log result from another invocation or a future attempt',async()=>{
   const f=evidenceFixture();f.results.get(1)!.execution.runAttempt=2;
-  expect((await inspectNativeCycle(f.context,[],f.io,NOW)).budget.remaining).toBeNull();
+  expect((await inspectNativeCycle(f.context,[],f.io,NOW)).readObservation.disposition).not.toBe('COMPLETE');
 });
 it('checks artifact effects before believing a failure outcome and does not deduct a confirmed effect',async()=>{
   const f=evidenceFixture(),bytes=Buffer.from('native build bytes'),id=900;
   f.results.get(1)!.objects=[{kind:'artifact',id,digest:digest(bytes)}];
   f.artifacts.push({id,name:'build-output',expired:false,workflow_run:{id:100,head_sha:S},digest:'sha256:'+digest(bytes),size_in_bytes:bytes.length});f.downloads.set(id,bytes);
-  const r=await inspectNativeCycle(f.context,[],f.io,NOW);expect(r.budget.remaining).toBe(3);expect(r.native.attempts[0]!.invocations[0]!.evidence.outcome).toBe('EFFECT_CONFIRMED');
+  const r=await inspectNativeCycle(f.context,[],f.io,NOW);expect(r.readObservation.disposition).toBe('COMPLETE');expect(r.native.attempts[0]!.invocations[0]!.evidence.outcome).toBe('EFFECT_CONFIRMED');
   expect((await recoverNativeCycle(f.context,100,f.store,[],f.io,NOW)).reason).toBe('EFFECTS_ARCHIVED');expect(f.calls.some(call=>call.startsWith('POST'))).toBe(false);
 });
 it('keeps the original build input digest after release IDs are frozen later in the same cycle',async()=>{
   const f=evidenceFixture();f.context.cycle.units[0]!.releaseId=7;f.context.cycle.units[0]!.manifestDigest='e'.repeat(64);
-  expect((await inspectNativeCycle(f.context,[],f.io,NOW)).budget.remaining).toBe(2);
+  expect((await inspectNativeCycle(f.context,[],f.io,NOW)).readObservation.disposition).toBe('COMPLETE');
 });
 it('uses original archives for explicitly expired logs of a still-readable terminal Run',async()=>{
   const f=evidenceFixture(),first=await inspectNativeCycle(f.context,[],f.io,NOW);f.setLogs(false);
   const history=first.archives.map(value=>({value,path:archiveFile(value).path,commit:D}));
-  expect((await inspectNativeCycle(f.context,history,f.io,NOW)).budget.remaining).toBe(2);
+  expect((await inspectNativeCycle(f.context,history,f.io,NOW)).readObservation.disposition).toBe('COMPLETE');
 });
 it('does not fall back to old logs on a permission failure',async()=>{
   const f=evidenceFixture(),first=await inspectNativeCycle(f.context,[],f.io,NOW);
   f.overrides.set('GET /repos/example/product/actions/jobs/1000/logs',f.response({},403));
   const history=first.archives.map(value=>({value,path:archiveFile(value).path,commit:D}));
-  expect((await inspectNativeCycle(f.context,history,f.io,NOW)).budget.remaining).toBeNull();
+  expect((await inspectNativeCycle(f.context,history,f.io,NOW)).readObservation.disposition).not.toBe('COMPLETE');
 });
 it('detects source/status movement during a scan and keeps it out of the rerun branch',async()=>{
   const f=evidenceFixture();let reads=0;
@@ -262,7 +248,7 @@ function channelFixture() {
 }
 it('recovers a successful pending Run through its exact native channel-prepare job, without --failed',async()=>{
   const f=channelFixture();f.setAccepted();const r=await recoverNativeCycle(f.context,100,f.store,[],f.io,NOW,f.readHistory);
-  expect(r.status).toBe('ACCEPTED');expect(f.calls.filter(call=>call.startsWith('POST'))).toEqual(['POST /repos/example/product/actions/jobs/1000/rerun']);expect(r.observation.budget.remaining).toBe(3);
+  expect(r.status).toBe('ACCEPTED');expect(f.calls.filter(call=>call.startsWith('POST'))).toEqual(['POST /repos/example/product/actions/jobs/1000/rerun']);expect(r.observation.readObservation.disposition).toBe('COMPLETE');
 });
 it.each(['missing','duplicate'])('rejects %s channel-prepare identity instead of guessing an executable job',async kind=>{
   const f=channelFixture();if(kind==='missing')f.jobs.get(1)![0].name='other';else f.jobs.get(1)!.push({...f.jobs.get(1)![0],id:1001,steps:[]});
@@ -274,7 +260,7 @@ it('resolves the actual pinned runner checkout through a reusable workflow inste
   f.overrides.set(`GET /repos/example/product/contents/.github/workflows/steward-release-publish.yml?ref=${S}`,blob(`jobs:\n  build:\n    uses: splrad/steward/.github/workflows/product-release.yml@${D}\n`));
   const controller='b'.repeat(40);
   f.overrides.set(`GET /repos/splrad/steward/contents/.github/workflows/product-release.yml?ref=${D}`,blob(`jobs:\n  build:\n    steps:\n      - uses: actions/checkout@${S}\n        with:\n          repository: splrad/steward\n          ref: ${controller}\n`));
-  const r=await inspectNativeCycle(f.context,[],f.io,NOW);expect(r.budget.remaining).toBe(2);expect(r.archives[0]!.executorControllerSha).toBe(controller);expect(r.archives[0]!.sourceBlobs).toHaveLength(2);
+  const r=await inspectNativeCycle(f.context,[],f.io,NOW);expect(r.readObservation.disposition).toBe('COMPLETE');expect(r.archives[0]!.executorControllerSha).toBe(controller);expect(r.archives[0]!.sourceBlobs).toHaveLength(2);
 });
 it('streams native object digests under the existing build size bound without retaining the entire object in memory',async()=>{
   const bytes=Buffer.from('native streamed artifact');
@@ -284,7 +270,7 @@ it('streams native object digests under the existing build size bound without re
 });
 it('rejects a result naming a unit outside the frozen cycle',async()=>{
   const f=evidenceFixture();const e=f.results.get(1)!.execution;e.unitId='other';e.invocationKey=digest(JSON.stringify([1,e.cycleId,10,100,1,'build',1000,2,'other',null,e.inputDigest]));
-  const r=await inspectNativeCycle(f.context,[],f.io,NOW);expect(r.budget.remaining).toBeNull();expect(r.errors[0]!.code).toContain('result unit');
+  const r=await inspectNativeCycle(f.context,[],f.io,NOW);expect(r.readObservation.disposition).not.toBe('COMPLETE');expect(r.errors[0]!.code).toContain('result unit');
 });
 it('derives the 1/5/15/60 minute read backoff from prior observations without changing the business budget',async()=>{
   const f=evidenceFixture();f.overrides.set('GET /repos/example/product/actions/runs/100',f.response({},503));
@@ -292,7 +278,7 @@ it('derives the 1/5/15/60 minute read backoff from prior observations without ch
   for(const delay of [1,5,15,60,60]) {
     const result=await inspectNativeCycle(f.context,[],f.io,now,{complete:true,observations});
     expect(result.readObservation.disposition).toBe('RETRY');expect(Date.parse(result.readObservation.nextCheckAt!)-Date.parse(now)).toBe(delay*60_000);
-    expect(result.budget.failedWaveKeys).toHaveLength(0);expect(result.budget.remaining).toBeNull();observations.push(result.readObservation);now=result.readObservation.nextCheckAt!;
+    expect(result.readObservation.disposition).not.toBe('COMPLETE');observations.push(result.readObservation);now=result.readObservation.nextCheckAt!;
   }
 });
 it('respects Retry-After as a lower bound and archives the failure observation before yielding',async()=>{
@@ -306,7 +292,7 @@ it('respects Retry-After as a lower bound and archives the failure observation b
     if(kind==='object'){nested.results.get(1)!.objects=[{kind:'artifact',id:900,digest:'e'.repeat(64)}];path='actions/artifacts/900';}
     nested.overrides.set('GET /repos/example/product/'+path,nested.response({},429,{'retry-after':'7200'}));
     const observation=await inspectNativeCycle(nested.context,[],nested.io,NOW);
-    expect(Date.parse(observation.readObservation.nextCheckAt!)-Date.parse(NOW)).toBe(7200_000);expect(observation.budget.remaining).toBeNull();
+    expect(Date.parse(observation.readObservation.nextCheckAt!)-Date.parse(NOW)).toBe(7200_000);expect(observation.readObservation.disposition).not.toBe('COMPLETE');
   }
 });
 it.each([false,true])('requires complete Git history before declaring expired original evidence unrecoverable: %s',async complete=>{

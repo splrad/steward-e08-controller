@@ -13,11 +13,11 @@ import { parseReleaseRecord, type CycleRecord } from '../../core/src/release-obs
 import { decodeNativeDispatchObservation, decodeNativeSourceRejection, type NativeSourceRejection, type NativeDispatchObservation, type NativeRun } from '../../core/src/native-evidence.js';
 import { parseNativeResult, decodeNativeChannel, decodeNativeChannelRead, type NativeChannelRead, type NativeChannelEvidence, type NativeJob, type NativeResult } from '../../core/src/native-evidence.js';
 import { normalizedDeliveryFile, verifyNormalizedDelivery } from './release-pipeline.js';
-import { NativeEvidenceReader, nativeRunFact, nativeRequestIdentity, validateEvidenceContext, EvidenceReadError, stableReleaseFacts, stableAssetFacts, sameChannelOperation,
-  verifyNativeRetryLimit, verifyNativeSourceRejection, inspectNativeCycle, sourceRun, type SourceRejectionFile, type RetryLimitFile, type ArchivedFile,
+import { NativeEvidenceReader, formalReleaseReader, nativeRunFact, nativeRequestIdentity, validateEvidenceContext, EvidenceReadError, stableReleaseFacts, stableAssetFacts, sameChannelOperation,
+  verifyNativeSourceRejection, inspectNativeCycle, sourceRun, type SourceRejectionFile, type RetryLimitFile, type ArchivedFile,
   jobFact, type EvidenceContext, type EvidenceTransport, type ArchiveFile } from './native-release-evidence.js';
 export interface RunIdentity { repositoryId: number; unitId: string; sourceSha: string; controllerSha: string; runId: number; attempt: number }
-export interface ProducerReceipt { buildId: string; jobId: number; attempt: number; artifactId: number }
+export interface ProducerReceipt { buildId: string; jobId: number; runId?: number; attempt: number; artifactId: number }
 export interface ProducerJob { id: number; runId: number; attempt: number; buildId: string; sourceSha: string; controllerSha: string; status: string; conclusion: string | null }
 export interface ProducerArtifact { id: number; runId: number; name: string; expired: boolean; digest: string }
 function fail(reason: string): never { throw new Error(`RELEASE_RUN: ${reason}`); }
@@ -37,18 +37,19 @@ export function selectReleaseProducers(unit: { id: string; builds: readonly { id
   const producers: ProducerReceipt[] = [], digests: Record<string, string> = {};
   for (const build of unit.builds) {
     const jobs = input.jobs.filter(job => job.buildId === build.id);
-    if (jobs.some(job => job.runId !== identity.runId || job.sourceSha !== identity.sourceSha || job.controllerSha !== identity.controllerSha
-      || !Number.isSafeInteger(job.attempt) || job.attempt < 1 || job.attempt > identity.attempt || !Number.isSafeInteger(job.id) || job.id < 1)) fail('producer source identity');
-    if (new Set(jobs.map(job => job.attempt)).size !== jobs.length) fail('ambiguous job attempt');
+    if (jobs.some(job => !Number.isSafeInteger(job.runId) || job.runId < 1 || job.sourceSha !== identity.sourceSha || job.controllerSha !== identity.controllerSha
+      || !Number.isSafeInteger(job.attempt) || job.attempt < 1 || job.runId===identity.runId && job.attempt>identity.attempt || !Number.isSafeInteger(job.id) || job.id < 1)) fail('producer source identity');
+    if (new Set(jobs.map(job => `${job.runId}:${job.attempt}`)).size !== jobs.length) fail('ambiguous job attempt');
+    if(new Set(jobs.map(job=>job.runId)).size>1)fail('ambiguous producer run');
     const job = jobs.filter(job => job.status === 'completed' && job.conclusion === 'success').sort((a, b) => b.attempt - a.attempt)[0];
     if (!job) fail('missing successful build');
     if (jobs.some(other => other.status !== 'completed' && other.attempt >= job.attempt)) fail('producer still active');
-    const matches = input.artifacts.filter(artifact => artifact.name === producerArtifactName(identity, build.id, job.attempt));
+    const matches = input.artifacts.filter(artifact => artifact.name === producerArtifactName({...identity,runId:job.runId}, build.id, job.attempt));
     if (matches.length !== 1) fail('missing or duplicate producer artifact');
     const artifact = matches[0]!;
-    if (artifact.runId !== identity.runId || artifact.expired !== false || !/^sha256:[a-f0-9]{64}$/.test(artifact.digest)
+    if (artifact.runId !== job.runId || artifact.expired !== false || !/^sha256:[a-f0-9]{64}$/.test(artifact.digest)
       || !Number.isSafeInteger(artifact.id) || artifact.id < 1) fail('artifact source or digest');
-    producers.push({ buildId: build.id, jobId: job.id, attempt: job.attempt, artifactId: artifact.id }); digests[String(artifact.id)] = artifact.digest;
+    producers.push({ buildId: build.id, jobId: job.id, ...(job.runId!==identity.runId?{runId:job.runId}:{}), attempt: job.attempt, artifactId: artifact.id }); digests[String(artifact.id)] = artifact.digest;
   }
   const result = { producers, digests };
   if (input.frozen && JSON.stringify(input.frozen) !== JSON.stringify(result)) fail('frozen release producers changed');
@@ -72,7 +73,7 @@ export function assertReleaseJobResults(mode: 'build' | 'verify' | 'product', si
 export function productBusinessResults(context: EvidenceContext, request: CycleRecord['dispatches'][number], run: NativeRun,
   job: NativeJob, unitId: string, observedAt: string, objects: NativeResult['objects'] = [], notStarted: readonly number[] = []): NativeResult[] {
   verifyExecutionSource(run, { ...context, request });
-  if (request.canonicalRunId !== run.id || request.purpose !== 'build' || run.triggeringActorId !== context.appBotId
+  if (request.canonicalRunId !== run.id || request.purpose !== 'build'
     || job.runId !== run.id || job.runAttempt !== run.runAttempt || job.headSha !== context.cycle.sourceSha
     || !context.cycle.units.some(unit => unit.id === unitId)) fail('business result source');
   return job.steps.filter(step => step.name.startsWith('business-') && step.startedAt && step.completedAt).map(step => {
@@ -318,7 +319,7 @@ export function verifyChannelProbe(context:EvidenceContext,targets:ChannelTarget
   if(!exact(report,['schemaVersion','cycleId','sourceSha','executionSha','controllerSha','targetsDigest','nativeRunId','runAttempt','items'])
     ||report.schemaVersion!==1||report.cycleId!==context.cycle.id||report.sourceSha!==context.cycle.sourceSha||report.controllerSha!==context.cycle.controllerSha
     ||report.targetsDigest!==channelTargetsDigest(context,targets)||report.executionSha!==run.headSha||report.nativeRunId!==run.id||report.runAttempt!==run.runAttempt
-    ||run.repositoryId!==context.repositoryId||run.headRepositoryId!==context.repositoryId||run.actorId!==context.appBotId||run.triggeringActorId!==context.appBotId
+    ||run.repositoryId!==context.repositoryId||run.headRepositoryId!==context.repositoryId||run.actorId!==context.appBotId
     ||run.path!=='.github/workflows/steward-release-channels.yml'||run.event!=='workflow_dispatch'||job.runId!==run.id||job.runAttempt!==run.runAttempt
     ||job.headSha!==run.headSha||job.name!=='observe'||job.status!=='completed'||job.conclusion!=='success'||!job.startedAt||!job.completedAt
     ||!Array.isArray(report.items)||report.items.length!==targets.length||Buffer.byteLength(JSON.stringify(report))>4096+4096*targets.length) fail('probe source or bound');
@@ -369,7 +370,7 @@ export function selectChannelDispatch(context:EvidenceContext,reads:ChannelReadI
 
 export function channelBusinessResults(context:EvidenceContext,request:Dispatch,run:NativeRun,job:NativeJob,target:ChannelTarget,observedAt:string,objects:NativeResult['objects']=[]) {
   verifyExecutionSource(run,{...context,request});channelTargets(context,[target]);
-  if(request.purpose==='build'||request.canonicalRunId!==run.id||run.triggeringActorId!==context.appBotId||job.runId!==run.id
+  if(request.purpose==='build'||request.canonicalRunId!==run.id||job.runId!==run.id
     ||job.runAttempt!==run.runAttempt||job.headSha!==request.executionSha)fail('channel result source');
   return job.steps.filter(step=>step.name.startsWith('business-')&&step.startedAt&&step.completedAt).map(step=>{
     const started=step.conclusion!=='skipped',outcome=!started?'REJECTED_BEFORE_BUSINESS':step.conclusion==='success'?'EFFECT_CONFIRMED':'BUSINESS_FAILED';
@@ -392,22 +393,9 @@ export interface DispatchStore {
 export interface DispatchHistory { complete: boolean; observations:NativeDispatchObservation[]; retryLimits?:RetryLimitFile[]; archives?:ArchivedFile[]; sourceRejections?:SourceRejectionFile[];
   publication?:NonNullable<import('./native-release-evidence.js').ReadHistory['publication']> }
 
-export function prepareContinuation(context:EvidenceContext,proof:RetryLimitFile,archives:ArchivedFile[],sentAt:string,execution?:{ref:string;sha:string}):Dispatch {
-  const limit=verifyNativeRetryLimit(context,proof,archives), original=context.cycle.dispatches.find(item=>item.requestKey===limit.requestKey)!;
-  if(original.purpose==='build'||context.cycle.units.some(unit=>unit.releaseId===null||unit.manifestDigest===null||!unit.assets.length))fail('continuation requires frozen channel releases');
-  const request=structuredClone(original);
-  Object.assign(request,{canonicalRunId:null,nativeResponseEvidencePath:null,searchWindows:[],sentAt:new Date(Math.floor(Date.parse(sentAt)/1000)*1000).toISOString(),
-    continuationOfRunId:original.canonicalRunId,retryLimitEvidencePath:proof.path});
-  if(execution){request.ref=execution.ref;request.executionSha=execution.sha;request.inputs.execution_sha=execution.sha;}
-  Object.assign(request,nativeRequestIdentity(context.repositoryId,context.cycle,request));request.inputs.request_key=request.requestKey;
-  request.inputs.operation_key=request.operationKey;
-  if(context.cycle.dispatches.some(item=>item.requestKey===request.requestKey))fail('continuation already exists');
-  return request;
-}
-
 /** Download and verify the original formal bytes; continuation never selects a build. */
 export async function verifyContinuationReleases(context:EvidenceContext,io:EvidenceTransport) {
-  const reader=new NativeEvidenceReader(io,context.repository);
+  const reader=await formalReleaseReader(context,io);
   for(const unit of context.cycle.units) {
     if(unit.releaseId===null||!unit.assets.length||unit.manifestDigest===null||unit.notesDigest===null)fail('frozen release required');
     const release=await reader.json(`releases/${unit.releaseId}`),assets=await reader.pages(`releases/${unit.releaseId}/assets`,'');
@@ -523,25 +511,7 @@ export async function dispatchNativeRun(input:EvidenceContext, requestKey:string
     .map(value=>decodeNativeDispatchObservation(Buffer.from(JSON.stringify(value)))).sort((a,b)=>Date.parse(a.observedAt)-Date.parse(b.observedAt));
   const result=(status:string,reason:string,nextCheckAt:string|null=null)=>({status,reason,canonicalRunId:request.canonicalRunId,nextCheckAt});
   if(request.canonicalRunId!==null)return result('BOUND','CANONICAL_RUN_IMMUTABLE');
-  // A continuation needs its separately archived native platform-limit proof. Missing proof never authorizes a new Run.
-  if(request.continuationOfRunId!==null) {
-    const proof=history.retryLimits?.find(item=>item.path===request.retryLimitEvidencePath);
-    if(!proof||!history.archives)return result('WAIT','NATIVE_RETRY_LIMIT_PROOF_REQUIRED');
-    try {
-      const limit=verifyNativeRetryLimit(context,proof,history.archives);
-      const parent=cycle.dispatches.find(item=>item.canonicalRunId===request.continuationOfRunId);
-      if(request.purpose==='build'||limit.terminalRun.id!==request.continuationOfRunId||!parent||!sameChannelOperation(parent,request))fail('continuation source');
-      const prior=structuredClone(context);prior.cycle.dispatches=prior.cycle.dispatches.filter(item=>item.requestKey!==request.requestKey);
-      const full=await inspectNativeCycle(prior,history.archives,io,observedAt,{complete:true,observations:[],retryLimits:history.retryLimits??[],sourceRejections:history.sourceRejections??[],...(history.publication?{publication:history.publication}:{})});
-      if(full.budget.remaining===null)return result('UNKNOWN','CONTINUATION_HISTORY_INCOMPLETE');
-      if(full.budget.inFlightWaveKeys.length)return result('WAIT','RUN_IN_FLIGHT');
-      if(full.budget.remaining===0)return result('BLOCKED','FAILURE_BUDGET_EXHAUSTED');
-      const original=prior.cycle.dispatches.find(item=>item.canonicalRunId===request.continuationOfRunId)!;
-      const latest=full.archives.findLast(item=>item.run.id===request.continuationOfRunId)?.run;
-      if(latest) {sourceRun(context,original,latest);if(JSON.stringify(latest)!==JSON.stringify(limit.terminalRun))return result('WAIT','LIMIT_RUN_CHANGED');}
-      await verifyContinuationReleases(context,io);
-    }catch{return result('UNKNOWN','CONTINUATION_EVIDENCE_UNAVAILABLE');}
-  }
+  if(request.continuationOfRunId!==null)return result('BLOCKED','NATIVE_MAINTENANCE_REQUIRED');
   const reader=new NativeEvidenceReader(io,context.repository);
   const observation=(kind:NativeDispatchObservation['kind']):NativeDispatchObservation=>({schemaVersion:1,repositoryId:context.repositoryId,cycleId:cycle.id,requestKey,
     observedAt,kind,senderNonce:kind==='PREPARED'?randomBytes(16).toString('hex'):null,status:null,response:null,run:null,window:null,pages:[],matches:[],errorCode:null,nextCheckAt:null});
@@ -633,7 +603,7 @@ export function verifyChannelResult(context:EvidenceContext,request:Dispatch,run
   if(!keys(payload,['schemaVersion','cycleId','sourceSha','executionSha','controllerSha','targetsDigest','nativeRunId','runAttempt','items'])
     ||payload.schemaVersion!==1||payload.cycleId!==context.cycle.id||payload.sourceSha!==context.cycle.sourceSha||payload.controllerSha!==context.cycle.controllerSha
     ||payload.executionSha!==run.headSha||payload.targetsDigest!==channelTargetsDigest(context,targets)||payload.nativeRunId!==run.id||payload.runAttempt!==run.runAttempt
-    ||run.triggeringActorId!==context.appBotId||job.runId!==run.id||job.runAttempt!==run.runAttempt||job.headSha!==run.headSha
+    ||job.runId!==run.id||job.runAttempt!==run.runAttempt||job.headSha!==run.headSha
     ||job.status!=='completed'||job.conclusion!=='success'||!job.startedAt||!job.completedAt||!Array.isArray(payload.items)||payload.items.length!==1)fail('channel result identity');
   const item=payload.items[0] as ChannelResultItem,target=targets.find(target=>target.unitId===item.unitId&&target.channelId===item.channelId);
   if(!keys(item,['unitId','channelId','version','releaseId','manifestDigest','nativeObjectId','digest','accepted','indexed','consumed','observedAt'])||!target

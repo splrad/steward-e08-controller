@@ -37,7 +37,6 @@ export async function advanceReleaseCandidate(session: CandidateSession, io: Can
   const repository = session.repository;
   assertRepositoryWrite(repository);
   if (repository.defaultBranch !== io.defaultBranch) throw new Error('CANDIDATE_DEFAULT_BRANCH_DRIFT');
-  if (repository.activeCycleId) return { status: 'WAIT', reason: 'ACTIVE_CYCLE' };
   const save = async () => { repository.revision++; repository.lastProgressAt = io.now(); return io.save(session); };
   const source = await io.source();
   let candidate = repository.candidate;
@@ -45,7 +44,7 @@ export async function advanceReleaseCandidate(session: CandidateSession, io: Can
     const old = await io.legacyCandidate(), branch = old?.branch ?? 'steward/release-candidate';
     candidate = { id: await candidateId(repository.repositoryId, branch, source.baseSha, repository.lastCompletedCycleId),
       prNumber: old?.number ?? null, branch, baseSha: source.baseSha, generatedSnapshotPath: null, publishedHead: null,
-      editingAckHead: null, statusCommentId: null, contentGenerationDigest: digest([source.baseSha, source.authorsDigest]),
+      statusCommentId: null, contentGenerationDigest: digest([source.baseSha, source.authorsDigest]),
       adoptionOverride: null, observedLabelEventIds: [], pendingWrite: null };
     repository.candidate = candidate; await save();
   }
@@ -54,10 +53,16 @@ export async function advanceReleaseCandidate(session: CandidateSession, io: Can
     const selected = candidate.prNumber === null ? prs.filter(p => p.base === io.defaultBranch && p.body.includes(`<!-- steward:candidate:${candidate.id} -->`))
       : prs.filter(p => p.number === candidate.prNumber && p.base === io.defaultBranch);
     if (selected.length > 1) throw new Error('CANDIDATE_MULTIPLE_PRS');
+    if (prs.some(p => p.state === 'open' && p.base === io.defaultBranch && !selected.includes(p))) throw new Error('CANDIDATE_UNRELATED_OPEN_PR');
     if (candidate.prNumber !== null && !selected.length) throw new Error('CANDIDATE_PR_UNAVAILABLE');
     const pr = selected[0] ?? null;
     if (pr && candidate.prNumber === null) { candidate.prNumber = pr.number; await save(); }
-    return { pr, head: pr?.head ?? await io.branchHead(candidate.branch) };
+    const head = pr?.head ?? await io.branchHead(candidate.branch);
+    // The old reviewed branch survives a completed cycle. Its exact merged head
+    // is only the next push's parent; new content starts from the new default B.
+    const retiredHead = !pr && candidate.prNumber === null && !session.generated && head !== null
+      && prs.some(p => p.state === 'closed' && p.merged && p.base === io.defaultBranch && p.head === head);
+    return { pr, head, retiredHead };
   };
   const finishPending = async () => {
     if (!session.pending) return null;
@@ -82,15 +87,15 @@ export async function advanceReleaseCandidate(session: CandidateSession, io: Can
         await finish(pending.write); return { status: 'APPLIED' as const, head: value.head };
       }
       if (value.pr?.editing || value.head !== pending.write.expectedHead || (await io.source()).baseSha !== pending.write.baseSha) {
-        // The original proposal remains in protected state history. Keep G/H
-        // unchanged and permit a fresh three-way merge on the next wake.
+        // The original proposal remains in protected state history. Keep the previous generated snapshot
+        // so the next wake can detect and preserve human differences.
         candidate.pendingWrite = null; session.pending = null; await save();
         return { status: value.pr?.editing ? 'CANCELLED_FOR_EDITING' as const : 'REPLAN' as const };
       }
     }
     return result;
   };
-  // Recovery precedes editing acknowledgment, including accepted pushes followed by human commits.
+  // Recovery precedes the editing pause, including accepted pushes followed by human commits.
   const recovered = await finishPending();
   if (recovered && !['APPLIED', 'CANCELLED_FOR_EDITING'].includes(recovered.status)) return { status: 'WAIT', reason: recovered.status };
   let observed = await current();
@@ -116,9 +121,16 @@ export async function advanceReleaseCandidate(session: CandidateSession, io: Can
     if (candidate.statusCommentId !== readback[0]!.id) { candidate.statusCommentId = readback[0]!.id; await save(); }
   };
   if (observed.pr?.editing) {
-    candidate.editingAckHead = observed.pr.head; session.preview = `已暂停候选写入。编辑确认 head：${observed.pr.head}。请刷新到该 head 后继续编辑。\n`;
+    session.preview = `已暂停候选写入；请在原PR处理人工修改。当前 head：${observed.pr.head}。\n`;
     const archive = await save(); await statusComment(session.preview, archive, observed.pr.head);
     return { status: 'WAIT', reason: 'EDITING', head: observed.pr.head };
+  }
+  if (session.generated && observed.head) {
+    const difference = await mergeCandidate(io.workspace, session.generated, observed.head, session.generated, io.temporaryRoot);
+    if (difference.status === 'CONFLICT') {
+      session.conflict = { head: observed.head, generated: session.generated, paths: difference.conflictPaths }; await save();
+      return { status: 'CONFLICT', reason: difference.conflictPaths.some(path => !path.startsWith('.release-notes/')) ? 'SOURCE_CHANGED' : 'HUMAN_EDIT_CONFLICT', paths: difference.conflictPaths };
+    }
   }
   // Missing author facts block only this repository's new takeover, not implementation or other repositories.
   selectReleaseContributors([], source.authors);
@@ -136,7 +148,7 @@ export async function advanceReleaseCandidate(session: CandidateSession, io: Can
   observed = await current();
   if (observed.pr?.editing || observed.pr?.state === 'closed') return { status: 'WAIT', reason: 'PR_CHANGED_DURING_GENERATION' };
   const H = observed.head;
-  const merged = await mergeCandidate(io.workspace, session.generated, H ?? source.baseSha, N, io.temporaryRoot);
+  const merged = await mergeCandidate(io.workspace, session.generated, observed.retiredHead ? source.baseSha : H ?? source.baseSha, N, io.temporaryRoot);
   if (merged.status === 'CONFLICT') {
     session.conflict = { head: H ?? source.baseSha, generated: N, paths: merged.conflictPaths }; await save();
     return { status: 'CONFLICT', reason: merged.conflictPaths.some(path => !path.startsWith('.release-notes/')) ? 'SOURCE_CHANGED' : 'HUMAN_EDIT_CONFLICT', paths: merged.conflictPaths };
@@ -159,7 +171,7 @@ export async function advanceReleaseCandidate(session: CandidateSession, io: Can
   if (written?.status !== 'APPLIED') return { status: 'WAIT', reason: written?.status ?? 'WRITE_UNKNOWN' };
   } else {
     session.generated = N; candidate.baseSha = N.baseSha; candidate.generatedSnapshotPath = `generated/${candidate.id}/${digest(N)}.json`;
-    // The reviewed human head already equals the three-way result. Adopt that
+    // The current head already equals the generated result. Record that
     // exact head and retire the resolved conflict without rewriting its tree.
     candidate.publishedHead = H; session.conflict = null; await save();
   }

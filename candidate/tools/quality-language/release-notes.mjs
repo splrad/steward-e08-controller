@@ -8,7 +8,7 @@ import { isolatedCopilotClientOptions, isolatedCopilotSessionOptions } from './i
 /** @param {'preflight'|'generate'} mode @param {string} input @param {string} token
  * @param {(options: import('@github/copilot-sdk').CopilotClientOptions) => import('@github/copilot-sdk').CopilotClient} [createClient] */
 export async function releaseNotes(mode, input, token, createClient = options => new CopilotClient(options)) {
-  if (!['preflight', 'generate'].includes(mode) || Buffer.byteLength(input) > 24 * 1024) throw new Error('CONTENT_INPUT_LIMIT');
+  if (!['preflight', 'generate'].includes(mode)) throw new Error('CONTENT_MODE_INVALID');
   const directory = await mkdtemp(join(tmpdir(), 'steward-content-sdk-'));
   const client = createClient(isolatedCopilotClientOptions(directory, token));
   try {
@@ -49,7 +49,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   delete process.env.STEWARD_COPILOT_TOKEN;
   try {
     if (mode !== 'preflight' && mode !== 'generate') throw new Error('CONTENT_MODE_INVALID');
-    let input = ''; for await (const chunk of process.stdin) { input += chunk; if (Buffer.byteLength(input) > 24 * 1024) throw new Error('CONTENT_INPUT_LIMIT'); }
+    let input = ''; for await (const chunk of process.stdin) input += chunk;
     process.stdout.write(JSON.stringify(await releaseNotes(mode, input, token)) + '\n');
   } catch (error) {
     const message = error instanceof Error && /^(CONTENT_[A-Z_]+|RESPONSE_UNKNOWN)$/.test(error.message) ? error.message : 'RESPONSE_UNKNOWN';

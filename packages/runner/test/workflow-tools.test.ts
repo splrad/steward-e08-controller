@@ -16,10 +16,10 @@ vi.mock('node:child_process', async importOriginal => {
     state.calls.push({ command, args, env: options.env });
     if (state.missing && command === 'mise') return { status: 0, stdout: '{}', stderr: '' };
     const lookup = command === 'mise' && (JSON.stringify(args) === '["ls","--json"]'
-      || (args.length === 2 && args[0] === 'which' && ['jactionlint','zizmor','shellcheck','pyflakes','python'].includes(args[1]!)));
+      || (args.length === 2 && args[0] === 'which' && ['jactionlint','zizmor','shellcheck','ruff'].includes(args[1]!)));
     const base = process.env.MISE_DATA_DIR;
     const scanner = !!base && resolve(command).startsWith(resolve(base) + (process.platform === 'win32' ? '\\' : '/'))
-      && /(?:jactionlint|zizmor|shellcheck|pyflakes|python(?:\d+(?:\.\d+)*)?)(?:\.exe)?$/.test(command)
+      && /(?:jactionlint|zizmor|shellcheck|ruff)(?:\.exe)?$/.test(command)
       && (args[0] === '--profile' || args[0] === '--version' || args[0] === '--offline');
     if (!lookup && !scanner) throw new Error('TEST_SUBPROCESS_DENIED');
     if (args[0] === '--offline' && state.diagnostic) return { ...state.diagnostic, stderr: '' };
@@ -60,6 +60,8 @@ it('executes both locked tools without candidate configuration or credentials', 
   await writeFile(join(root, 'mise.toml'), '[env]\nTOKEN="candidate"\n');
   await expect(scanWorkflows(root, ['.github/workflows/test.yml'])).resolves.toMatchObject({results: [{status: 0}, {status: 0}]});
   expect(state.calls.some(call => call.args[0] === '--offline')).toBe(true);
+  expect(state.calls.some(call => call.args.includes('--ruff'))).toBe(true);
+  expect(state.calls.every(call => !call.args.includes('--pyflakes'))).toBe(true);
   expect(state.calls.every(call => !Object.keys(call.env).some(name => /TOKEN|SECRET|PRIVATE_KEY/.test(name)))).toBe(true);
   expect(state.calls.every(call => !call.args.includes('-ignore'))).toBe(true);
 }, 120000);
@@ -80,7 +82,7 @@ it.each(['single', 'max'])('accepts native queue %s and workflow source contexts
   const root = await fixture(YAML.stringify(d));
   await expect(scanWorkflows(root, await discoverWorkflowFiles(root))).resolves.toMatchObject({results: [{status: 0}, {status: 0}]});
 }, 120000);
-it.each(['invalid-queue', 'max-cancel', 'context', 'needs', 'duplicate-yaml', 'shellcheck', 'pyflakes'])('native diagnostics reject %s', async kind => {
+it.each(['invalid-queue', 'max-cancel', 'context', 'needs', 'duplicate-yaml', 'shellcheck', 'ruff'])('native diagnostics reject %s', async kind => {
   const d = YAML.parse(clean);
   d.concurrency = { group: 'workflow', queue: 'max', 'cancel-in-progress': false };
   if (kind === 'invalid-queue') d.concurrency.queue = 'all';
@@ -88,7 +90,7 @@ it.each(['invalid-queue', 'max-cancel', 'context', 'needs', 'duplicate-yaml', 's
   if (kind === 'context') d.jobs.test.steps[0].env = { SHA: '${{ job.workflow_shaa }}' };
   if (kind === 'needs') d.jobs.test.needs = 'missing';
   if (kind === 'shellcheck') d.jobs.test.steps = [{ shell: 'bash', run: 'echo $UNQUOTED' }];
-  if (kind === 'pyflakes') d.jobs.test.steps = [{ shell: 'python', run: 'print(undefined_name)' }];
+  if (kind === 'ruff') d.jobs.test.steps = [{ shell: 'python', run: 'print(undefined_name)' }];
   const root = await fixture(YAML.stringify(d) + (kind === 'duplicate-yaml' ? 'name: duplicate\n' : ''));
   await writeFile(join(root, '.github/jactionlint.yaml'), 'profile: correctness\nignores: [".*"]\n');
   await expect(scanWorkflows(root, await discoverWorkflowFiles(root))).rejects.toThrow(/jactionlint.*failed/);
@@ -216,6 +218,8 @@ it('retains max queues at workflow and job level through both real scanners', as
     .replace('    runs-on:', '    concurrency:\n      group: job\n      queue: max\n    runs-on:'));
   await expect(scanWorkflows(root, ['.github/workflows/test.yml'])).resolves.toMatchObject({results: [{status: 0}, {status: 0}]});
   expect(state.calls.some(call => call.args[0] === '--offline')).toBe(true);
+  expect(state.calls.some(call => call.args.includes('--ruff'))).toBe(true);
+  expect(state.calls.every(call => !call.args.includes('--pyflakes'))).toBe(true);
 }, 120000);
 it('still blocks unrelated actionlint errors alongside a valid queue', async () => {
   const root = await fixture(clean.replace('jobs:', 'concurrency:\n  group: workflow\n  queue: max\njobs:')

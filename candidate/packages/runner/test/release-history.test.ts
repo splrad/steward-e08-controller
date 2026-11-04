@@ -51,3 +51,25 @@ it('does not classify an ordinary version-touch PR or a fork by title/body',asyn
   const f=fixture();f.pr.head.repo.id=2;
   const result=await inspectCycleHistory(f.snapshot,f.io,NOW,async()=>f.fact,undefined,async()=>true);expect(result.result).toBe('UNKNOWN');expect(result.discovered).toHaveLength(0);
 });
+it.each(['complete','unfinished','unverified-source','missing-native-pr'])('checks prior obligations before admitting a merged handoff: %s',async kind=>{
+  const f=fixture(),next=structuredClone(f.snapshot.cycles[0]!.value),nextSha='e'.repeat(40);
+  Object.assign(next,{id:`pr-13-${nextSha}`,prNumber:13,sourceSha:nextSha});
+  const pr={...f.pr,id:202,number:13,merge_commit_sha:nextSha,merged_at:'2026-10-28T00:00:00Z'};
+  f.snapshot.reachable.push(nextSha);f.snapshot.defaultHead=nextSha;
+  if(kind==='unfinished')f.fact.observation.releases=[];
+  const response=(value:unknown)=>({status:200,headers:new Headers(),bytes:Buffer.from(JSON.stringify(value))});
+  const io={request:async(method:'GET'|'POST',path:string)=>{
+    if(path.includes('/commits/main'))return response({sha:nextSha});
+    if(path.includes('/commits/')&&path.includes('/pulls')||path.includes('pulls?state=closed'))return response(kind==='missing-native-pr'?[f.pr]:[f.pr,pr]);
+    if(path.endsWith('/pulls/13'))return response(pr);
+    return f.io.request(method,path);
+  }};
+  const checked:string[]=[];
+  const result=await inspectCycleHistory(f.snapshot,io,NOW,async()=>f.fact,undefined,async(p,cycle)=>{
+    checked.push(cycle!.id);return kind!=='unverified-source'||p.number!==13;
+  },next);
+  expect(result.result).toBe(kind==='complete'?'PASS':kind==='unfinished'?'WAIT':'UNKNOWN');
+  if(kind!=='missing-native-pr')expect(checked).toContain(next.id);
+  expect(result.pendingHandoff).toBe(next.id);
+  expect(result.reasons.some(reason=>reason.cycleId===next.id&&reason.reason==='CYCLE_RECORD_RECONSTRUCTION_REQUIRED')).toBe(false);
+});

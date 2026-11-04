@@ -5,13 +5,13 @@ export function fixedContentSdk() {
   return {
     async preflight(){return 'READY';},
     async call(input) {
-      if(typeof input!=='string'||Buffer.byteLength(input)>24*1024)throw Error('CONTENT_INPUT_LIMIT');
+      if(typeof input!=='string')throw Error('CONTENT_FIXTURE_INPUT');
       const payload=JSON.parse(input);
-      if(!['CONTEXT','DIFF','COMPOSE'].includes(payload.stage)||!Array.isArray(payload.sources)||!Array.isArray(payload.items))throw Error('CONTENT_FIXTURE_INPUT');
+      if(!['DRAFT','CONTEXT','DIFF','COMPOSE'].includes(payload.stage)||!Array.isArray(payload.sources)||!Array.isArray(payload.items))throw Error('CONTENT_FIXTURE_INPUT');
       const sourceIds=[...new Set([...payload.sources.map(value=>value.id),...payload.items.flatMap(value=>value.sourceIds)])].sort();
       if(!sourceIds.length||sourceIds.some(id=>typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id)))throw Error('CONTENT_FIXTURE_SOURCE');
       const base={sourceIds,section:'summary',qualification:'UNVERIFIED'};
-      const result=payload.stage==='COMPOSE'?{paragraphs:[{...base,textZh:statement}]}:{items:[{...base,visibility:'UNRESOLVED',statementZh:statement}]};
+      const result=['DRAFT','COMPOSE'].includes(payload.stage)?{paragraphs:[{...base,textZh:statement}]}:{items:[{...base,visibility:'UNRESOLVED',statementZh:statement}]};
       const text=JSON.stringify(result);
       if(Buffer.byteLength(text)>12*1024)throw Error('CONTENT_OUTPUT_LIMIT');
       return {text,model:fixtureModel,usage:null};

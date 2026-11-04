@@ -67,7 +67,7 @@ it('publishes seven bytesets, waits for both channels, recovers protected consum
   const response=native.response;
   const io={request:async(method:string,path:string)=>{
     expect(method).toBe('GET');
-    if(path.endsWith('/product'))return response({id:1,full_name:'fixture/product',default_branch:'main',archived:false,disabled:false});
+    if(path.endsWith('/product'))return response({id:1,full_name:'fixture/product',default_branch:'main',archived:false,disabled:false,private:false});
     if(releaseProtectionFixture(path))return response(releaseProtectionFixture(path));
     if(path.endsWith('/git/ref/heads/steward/release-state'))return response({object:{sha:await git('-C',remote,'rev-parse','refs/heads/steward/release-state')}});
     if(path.includes('/git/blobs/')){const content=await git('-C',remote,'cat-file','blob',path.split('/').at(-1)!);return response({content:Buffer.from(content+'\n').toString('base64')});}
@@ -88,7 +88,7 @@ it('publishes seven bytesets, waits for both channels, recovers protected consum
     if(path.includes('/releases/20/assets?'))return response([...f.remote].map(([name,a])=>({id:a.id,name,size:a.bytes.length,state:'uploaded'})));
     if(path.endsWith('/releases/20'))return response(f.release);
     throw Error('unhandled cycle native read '+path);
-  }};
+  },anonymous:()=>({request:io.request})};
   const centralRun={id:900,repository:{id:1296724484},head_repository:{id:1296724484},workflow_id:20,path:'.github/workflows/release.yml',event:'schedule',head_sha:C,head_branch:'main',actor:{id:81},triggering_actor:{id:81},run_attempt:1,status:'in_progress',conclusion:null as string|null,created_at:NOW,updated_at:NOW,display_title:'Release'};
   const centralJob={id:901,run_id:900,run_attempt:1,head_sha:C,name:'release-coordinator',status:'in_progress',conclusion:null as string|null,started_at:NOW,completed_at:null as string|null,steps:[{number:3,name:'business-release-coordinator',started_at:NOW,completed_at:null as string|null,conclusion:null as string|null}]};
   const centralIo={request:async(method:string,path:string)=>{expect(method).toBe('GET');if(path.endsWith('/steward'))return response({id:1296724484,full_name:'splrad/steward',default_branch:'main',archived:false,disabled:false});if(path.includes('/workflows/20'))return response({id:20,path:centralRun.path});if(path.includes('/jobs?'))return response({total_count:1,jobs:[centralJob]});return response(centralRun);}};
@@ -111,12 +111,12 @@ it('publishes seven bytesets, waits for both channels, recovers protected consum
   let current=(await read()).cycles[0].value;current.channelFacts=[fact];await adopt([file(`cycles/${cycle.id}.json`,current)]);
   const oras=async(args:readonly string[])=>JSON.stringify(args[0]==='repo'?{name:'fixture/product',tags:registry?['1.2.3']:[]}:{digest:'sha256:'+'a'.repeat(64),size:100});
   const waiting=await observeReleaseChannels(input,{...options,controllerDirectory:process.cwd(),oras});
-  await readNativeCompletion(input,(await read()).cycles[0].value,options);expect(waiting).toMatchObject({status:'WAIT',reason:'CHANNEL_OBLIGATIONS'});
-  const blocked=await releaseCommand('candidate',input,options);expect(blocked,JSON.stringify(blocked)).toMatchObject({status:'WAIT',reason:'HISTORICAL_OBLIGATIONS'});
+  await readNativeCompletion(input,(await read()).cycles[0].value,options);expect(waiting).toMatchObject({status:'OBSERVED',reason:'MAIN_RELEASE_VERIFIED',completion:{result:'PASS',distributionResult:'WAIT'}});
+  expect((await read()).cycles[0].value.completedEvidencePath).toMatch(/^evidence\/completion\//);
   now='2026-11-26T00:02:00.000Z';
-  expect(await observeReleaseChannels(input,{...options,controllerDirectory:process.cwd(),oras})).toMatchObject({status:'WAIT',reason:'CHANNEL_OBLIGATIONS'});
+  expect(await observeReleaseChannels(input,{...options,controllerDirectory:process.cwd(),oras})).toMatchObject({status:'OBSERVED',reason:'MAIN_RELEASE_VERIFIED'});
   current=(await read()).cycles[0].value;const context={...native.context,cycle:current};
-  expect((await inspectNativeCycle(context,[],io,now)).budget.remaining).toBe(3);
+  const main=await readNativeCompletion(input,current,options);expect(evaluateCompletion(main.source,main.observation,now).result).toBe('PASS');
   now='2026-11-26T00:04:00.000Z';
   const targets=current.requiredChannels.map((c:any)=>({...c,version:unit.version,releaseId:20,manifestDigest:unit.manifestDigest}));
   const request=prepareChannelDispatch(context,10,'main',S,'verify',targets,'2026-11-26T00:03:00.000Z');request.canonicalRunId=201;current.dispatches.push(request);
@@ -126,6 +126,12 @@ it('publishes seven bytesets, waits for both channels, recovers protected consum
     response:{workflow_run_id:201,run_url:'https://api.github.com/repos/fixture/product/actions/runs/201',html_url:'https://github.com/fixture/product/actions/runs/201'},
     run:nativeRunFact(run),window:null,pages:[],matches:[],errorCode:null,nextCheckAt:null});
   request.nativeResponseEvidencePath=dispatchProof.path;const evidenceFiles=[dispatchProof];
+  await adopt([file(`cycles/${cycle.id}.json`,current),dispatchProof]);
+  Object.assign(run,{status:'in_progress',conclusion:null});
+  const duringChannel=await readNativeCompletion(input,current,options);
+  expect(evaluateCompletion(duringChannel.source,duringChannel.observation,now)).toMatchObject({result:'PASS',distributionResult:'WAIT'});
+  Object.assign(run,{status:'completed',conclusion:'success'});
+
   for(let i=0;i<targets.length;i++) {
     const target=targets[i],job={...native.jobs.get(1)![0],id:501+i,run_id:201,head_sha:S,name:`verify/${target.channelId}/app`,conclusion:'success',started_at:start,completed_at:now,steps:[{number:2,name:'business-channel',started_at:start,completed_at:now,conclusion:'success'}]};
     jobs.set(201,[...(jobs.get(201)??[]),job]);
@@ -143,7 +149,7 @@ it('publishes seven bytesets, waits for both channels, recovers protected consum
   const payload={schemaVersion:1,cycleId:cycle.id,sourceSha:S,executionSha:S,controllerSha:C,targetsDigest:key,nativeRunId:202,runAttempt:1,items:[{unitId:'app',channelId:'winget',version:unit.version,readStatus:'OK',exists:true,digest:null,accepted:true,indexed:true,observedAt:now,evidenceKind:'github-pr:33'}]};
   evidenceFiles.push(channelEvidenceFile({schemaVersion:1,repositoryId:1,cycleId:cycle.id,sourceSha:S,observedAt:now,kind:'PROBE',run:nativeRunFact(probe),job:jobFact(probeJob),artifact:{id:800,name:'probe',digest:'sha256:'+digest('probe'),createdAt:now},payload:JSON.stringify(payload)}));
   await adopt([file(`cycles/${cycle.id}.json`,current),...evidenceFiles]);merged=true;registry=true;
-  expect(await observeReleaseChannels(input,{...options,controllerDirectory:process.cwd(),oras})).toMatchObject({status:'OBSERVED',reason:'CYCLE_COMPLETION_VERIFIED'});
+  expect(await observeReleaseChannels(input,{...options,controllerDirectory:process.cwd(),oras})).toMatchObject({status:'OBSERVED',reason:'DISTRIBUTION_VERIFIED'});
   const completed=await read();expect(completed.cycles[0].value.completedEvidencePath).toMatch(/^evidence\/completion\//);
   const fresh=await readNativeCompletion(input,completed.cycles[0].value,options);expect(evaluateCompletion(fresh.source,fresh.observation,now).result).toBe('PASS');
   expect(fresh.observation.consumptions).toHaveLength(2);expect(fresh.provenance.some((p:any)=>p.path.startsWith('evidence/channel-read/'))).toBe(true);
@@ -164,7 +170,9 @@ it('publishes seven bytesets, waits for both channels, recovers protected consum
     else if(path.endsWith('/rulesets'))value=[{id:6,target:'tag',enforcement:'active'}];
     else if(path.endsWith('/rulesets/6'))value={id:6,target:'tag',enforcement:'active',conditions:{ref_name:{include:['~ALL'],exclude:[]}},rules:[{type:'deletion'},{type:'non_fast_forward'}]};
     else if(path.endsWith('/releases'))value=[f.release];
+    else if(path.endsWith('/releases/tags/'+unit.tag))value=f.release;
     else if(path.endsWith('/tags'))value=[{name:unit.tag,commit:{sha:S}}];
+    else if(path.endsWith('/git/ref/tags/'+unit.tag))value={ref:'refs/tags/'+unit.tag,object:{type:'commit',sha:S}};
     else if(path.endsWith('/actions/workflows'))value={total_count:0,workflows:[]};
     else if(path.endsWith('/pulls'))value=[];
     else {const result=await io.request('GET',path);return new Response(Buffer.from(result.bytes).toString('utf8'),{status:result.status});}
@@ -174,4 +182,9 @@ it('publishes seven bytesets, waits for both channels, recovers protected consum
     generator:async(request:any)=>{generations++;expect(request.facts.releases[0]).toMatchObject({id:20,sha:S,draft:false});return {status:'UNCHANGED'};}})).toMatchObject({status:'WAIT',reason:'UNCHANGED'});
   expect(generations).toBe(1);const next=await read();expect(next.repository.candidate.id).not.toBe(state.candidate.id);
   expect(next.repository).toMatchObject({activeCycleId:null,lastCompletedCycleId:cycle.id,candidate:{prNumber:null,baseSha:S}});
+  // Reobserving completed history must preserve the next candidate and its
+  // original draft/session identity, including before its PR-create response.
+  const reobserved=await inspectRepositoryHistory(input,{...options,completionReader:(value:any)=>readNativeCompletion(input,value,options)});
+  expect(reobserved,JSON.stringify(reobserved)).toMatchObject({result:'PASS'});
+  expect((await read()).repository.candidate).toEqual(next.repository.candidate);
 },process.platform==='win32'?360_000:150_000);

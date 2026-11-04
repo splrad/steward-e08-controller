@@ -152,13 +152,16 @@ export function parsePipelineRecord(input: unknown): PipelineRecord {
     parseDeliveryConfig(build.delivery);
     if (build.buildRef !== `refs/heads/steward/build/${build.cycleId}`
       || new Set(build.units.map(unit => unit.id)).size !== build.units.length) throw new Error('RELEASE_RECORD: build identity');
-    const jobs = new Set<string>();
+    const jobs = new Set<string>(), assetNames=new Set<string>();
     for (const unit of build.units) {
       const delivery = build.delivery.units.find(item => item.id === unit.id);
       if (!delivery) throw new Error('RELEASE_RECORD: undeclared unit');
       const expected = deliveryAssetNames(delivery, unit.version, unit.packageVersion);
       if (expected.size !== unit.assets.length || unit.assets.some(asset => expected.get(asset.id) !== asset.name))
         throw new Error('RELEASE_RECORD: delivery asset mapping');
+      for(const asset of unit.assets) {
+        const name=asset.name.toLowerCase();if(assetNames.has(name))throw new Error('RELEASE_RECORD: duplicate product asset');assetNames.add(name);
+      }
       assertPipelineSource(pipelineSource(build, unit.id));
       for (const producer of unit.builds) {
         if (jobs.has(producer.jobName)) throw new Error('RELEASE_RECORD: duplicate product job'); jobs.add(producer.jobName);

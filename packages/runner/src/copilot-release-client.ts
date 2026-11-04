@@ -9,7 +9,6 @@ export function copilotReleaseClient(controllerDirectory: string, token: string)
   const script = resolve(controllerDirectory, 'tools/quality-language/release-notes.mjs');
   const invoke = async (mode: 'preflight' | 'generate', input: string) => {
     if (!token.trim() || /[\r\n\0]/.test(token)) throw new Error('WAIT_AUTH');
-    if (Buffer.byteLength(input) > 24 * 1024) throw new Error('CONTENT_INPUT_LIMIT');
     const directory = await mkdtemp(join(tmpdir(), 'steward-content-client-'));
     try {
       const child = spawn(process.execPath, [script, mode], { cwd: directory, windowsHide: true, timeout: 210_000,

@@ -2,25 +2,38 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { releaseNotes } from './release-notes.mjs';
 
-function fixture({ authenticated = true, quota = 80, text = '{"items":[]}', finishReason = 'stop' } = {}) {
+function fixture({ authenticated = true, models = [{id:'native-default'}], text = '{"items":[]}', finishReason = 'stop', failure = null } = {}) {
   const events = [], handlers = new Map(); let clientOptions, sessionOptions;
   const client = { start: async () => events.push('start'), stop: async () => events.push('stop'),
     getAuthStatus: async () => ({ isAuthenticated: authenticated }),
-    rpc: { account: { getQuota: async () => ({ quotaSnapshots: { chat: { isUnlimitedEntitlement: false, remainingPercentage: quota } } }) } },
+    rpc: { account: { getQuota: async () => { throw Error('PERSONAL_QUOTA_NOT_APPLICABLE'); } }, models: { list: async () => ({models}) } },
     createSession: async options => {
       events.push('session'); sessionOptions = options;
       return { on: (type, handler) => handlers.set(type, handler), sendAndWait: async input => {
-        events.push('send'); handlers.get('assistant.usage')?.({ data: { model: 'fixture', inputTokens: 10, outputTokens: 5, finishReason } });
+        events.push('send'); if (failure) throw failure;
+        handlers.get('assistant.usage')?.({ data: { model: 'fixture', inputTokens: 10, outputTokens: 5, finishReason } });
         return { data: { content: text } };
       } };
     },
   };
   return { create: options => { clientOptions = options; return client; }, events, options: () => ({ clientOptions, sessionOptions }) };
 }
-test('read-only preflight creates no model session and waits on auth or quota', async () => {
-  for (const [setup, status] of [[{}, 'READY'], [{ authenticated: false }, 'WAIT_AUTH'], [{ quota: 0 }, 'WAIT_QUOTA'], [{ quota: NaN }, 'WAIT_QUOTA']]) {
+test('read-only organization preflight creates no session and does not consult personal-seat quotas', async () => {
+  for (const [setup, status] of [[{}, 'READY'], [{ authenticated: false }, 'WAIT_AUTH'], [{ models: [] }, 'WAIT_QUOTA']]) {
     const f = fixture(setup); assert.deepEqual(await releaseNotes('preflight', '', 'fixture-token', f.create), { status });
     assert.deepEqual(f.events, ['start', 'stop']);
+  }
+});
+
+test('expired tokens, organization policy and budget rejection do not retry or fall back', async () => {
+  for (const status of [401,403,429]) {
+    const f=fixture({failure:{status,response:{headers:new Headers({'retry-after':'120'})}}});
+    assert.deepEqual(await releaseNotes('generate','{}','workflow-token',f.create),{
+      status:status===429?'WAIT_QUOTA':'WAIT_AUTH',retryAfterMs:120000,
+    });
+    assert.deepEqual(f.events,['start','session','send','stop']);
+    assert.equal(f.options().clientOptions.gitHubToken,'workflow-token');
+    assert.equal(f.options().clientOptions.useLoggedInUser,false);
   }
 });
 test('SDK content call has no tools, agents, discovery or retained session and returns measured usage', async () => {
@@ -37,7 +50,7 @@ test('SDK capacity and output limits are explicit and always stop the client', a
     const f = fixture(setup); await assert.rejects(releaseNotes('generate', '{}', 'fixture-token', f.create), new RegExp(code)); assert.equal(f.events.at(-1), 'stop');
   }
 });
-test('oversized input never constructs the SDK client', async () => {
-  const f = fixture(); await assert.rejects(releaseNotes('generate', 'x'.repeat(24 * 1024 + 1), 'fixture-token', f.create), /CONTENT_INPUT_LIMIT/);
-  assert.deepEqual(f.events, []);
+test('curated input above the retired byte threshold reaches the SDK and retains service capacity errors', async () => {
+  const f = fixture(); const result=await releaseNotes('generate', 'x'.repeat(120 * 1024), 'fixture-token', f.create);
+  assert.equal(result.status,'RETURNED');assert.deepEqual(f.events,['start','session','send','stop']);
 });

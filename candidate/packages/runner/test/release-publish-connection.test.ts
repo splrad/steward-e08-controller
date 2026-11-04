@@ -2,16 +2,25 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, writeFile, readdir, copyFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pipelineIdentity, pipelinePreparePublication } from '../src/release-pipeline.js';
 import { sealProductArtifacts, fileDigest, type ProductReleaseManifest } from '../src/release-artifacts.js';
 import * as downloads from '../src/native-artifact-download.js';
 import { productPipelineFixture } from './product-pipeline-fixture.js';
 import { S, C, START, END, digest } from './native-evidence-fixture.js';
+import { permitOfflineScript } from './offline-fixtures.js';
 const roots:string[]=[];
 afterEach(async()=>{vi.restoreAllMocks();for(const root of roots.splice(0))await rm(root,{recursive:true,force:true});});
-it.each(['freeze','incomplete-run','foreign-source','formal-after-expiry','partial-draft','corrupt-formal','missing-public-asset'])('prepares publication from exact native objects: %s',async kind=>{
-  const f=productPipelineFixture(),admitted=await pipelineIdentity(f.input,f.environment,f.gh,f.io);
+it.each(['freeze','python-freeze','incomplete-run','foreign-source','formal-after-expiry','private-formal','partial-draft','corrupt-formal','missing-public-asset'])('prepares publication from exact native objects: %s',async kind=>{
+  const f=productPipelineFixture();
+  if(kind==='python-freeze') {
+    permitOfflineScript(resolve('scripts/inspect-python-release.py'));
+    f.input.controllerDirectory=process.cwd();delete f.source.VERSION;delete f.source['global.json'];
+    f.source['release-please-config.json']=JSON.stringify({'include-component-in-tag':false,'include-v-in-tag':true,packages:{'.':{'release-type':'python'}}});
+    f.source['pyproject.toml']='[project]\nname="fixture"\nversion="1.0.0"\n';
+    f.source['requirements-build.txt']='build==1.2.3 --hash=sha256:'+'f'.repeat(64)+'\n';
+  }
+  const admitted=await pipelineIdentity(f.input,f.environment,f.gh,f.io);
   if(admitted.status!=='ADMITTED')throw Error('fixture admission');
   const record=admitted.record,root=await mkdtemp(join(tmpdir(),'publish-connection-'));roots.push(root);
   const original=join(root,'original');await mkdir(original);
@@ -23,7 +32,7 @@ it.each(['freeze','incomplete-run','foreign-source','formal-after-expiry','parti
     deliverySha256:record.deliverySha256,templateSha256:record.templateSha256,runId:100,attempt:1,toolLocks:record.toolLocks,
     producers:[{buildId:'windows-x64',jobId:1000,attempt:1,artifactId:701}],artifacts:[{id:'app',mediaType:'application/octet-stream',...await fileDigest(original,'app-1.0.0.exe')}],evidence:[]};
   await sealProductArtifacts(original,manifest);
-  const names=await readdir(original),unit=f.context.cycle.units[0]!,bound=['formal-after-expiry','partial-draft','corrupt-formal','missing-public-asset'].includes(kind);
+  const names=await readdir(original),unit=f.context.cycle.units[0]!,bound=['formal-after-expiry','private-formal','partial-draft','corrupt-formal','missing-public-asset'].includes(kind);
   if(bound){unit.releaseId=20;unit.manifestDigest=(await fileDigest(original,'artifact-manifest.json')).sha256;}
   if(kind==='foreign-source')unit.manifestDigest='f'.repeat(64);
   Object.assign(f.runs.get(1),{status:kind==='incomplete-run'?'in_progress':'completed',conclusion:kind==='incomplete-run'?null:'success'});
@@ -44,11 +53,14 @@ it.each(['freeze','incomplete-run','foreign-source','formal-after-expiry','parti
     expect(input.artifactId).toBe(702);expect(token).toBe('fixture-product-token');await mkdir(input.directory);for(const name of names)await copyFile(join(original,name),join(input.directory,name));
   });
   const output=join(root,'prepared');await mkdir(output);
-  const result=pipelinePreparePublication(f.context,output,'controller','fixture-product-token',async()=>JSON.stringify(artifact),io,io,async(_repo,id,destination)=>{
+  const result=pipelinePreparePublication(f.context,output,f.input.controllerDirectory,'fixture-product-token',async args=>JSON.stringify(args.at(-1)==='repos/example/product'
+    ?{id:1,full_name:'example/product',archived:false,disabled:false,private:kind==='private-formal'}:artifact),io,io,async(_repo,id,destination,anonymous)=>{
+    expect(anonymous).toBe(kind!=='private-formal');
     await copyFile(join(original,names[id-300]!),destination);if(kind==='corrupt-formal'&&destination.endsWith('.exe'))await writeFile(destination,'other bytes');
   });
   if(['incomplete-run','foreign-source','corrupt-formal','missing-public-asset'].includes(kind))await expect(result).rejects.toThrow(kind==='incomplete-run'?'completed product Run':kind==='foreign-source'?'frozen manifest changed':kind==='missing-public-asset'?'formal frozen bytes missing':/manifest|artifact|sealed|hash|size/i);
   else {const prepared=await result;expect(prepared).toHaveLength(1);expect(prepared[0]!.manifest.runId).toBe(100);for(const name of names)expect(await readFile(join(output,'app',name))).toEqual(await readFile(join(original,name)));}
   if(kind==='formal-after-expiry')expect(download).not.toHaveBeenCalled();
-  if(kind==='freeze'||kind==='partial-draft')expect(download).toHaveBeenCalledOnce();
+  if(kind==='freeze'||kind==='python-freeze'||kind==='partial-draft')expect(download).toHaveBeenCalledOnce();
+  if(kind==='python-freeze')expect(manifest.toolLocks).toHaveProperty('source/requirements-build.txt',digest(f.source['requirements-build.txt']!));
 });

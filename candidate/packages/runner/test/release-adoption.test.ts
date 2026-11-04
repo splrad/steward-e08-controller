@@ -115,7 +115,7 @@ it('rejects a later onboarding PR without moving the adopted A/P',async()=>{
   const result=await initializeReleaseAdoption({...f.request,releaseAdoption:{sourceSha:later,prNumber:8}},{io:f.io});
   expect(result).toMatchObject({status:'CONFLICT',reason:'RELEASE_ADOPTION_CHANGED'});expect(await f.stateHead()).toBe(first.head);
 });
-it.each([false,true])('restores original cycle cache only with a known original budget; missing budget=%s',async missingBudget=>{
+it.each([false,true])('restores original cycle cache only with a known original evidence; missing evidence=%s',async missingBudget=>{
   const f=await fixture();await initializeReleaseAdoption(f.request,{io:f.io});await f.fetchState();
   await writeFile(join(f.request.directory,'VERSION'),'1.0.0\n');await writeFile(join(f.request.directory,'.release-please-manifest.json'),'{".":"1.0.0"}\n');
   await f.git('add','VERSION','.release-please-manifest.json');await f.git('commit','--signoff','-m','chore: release 1.0.0');const S=await f.git('rev-parse','main');
@@ -129,6 +129,6 @@ it.each([false,true])('restores original cycle cache only with a known original 
   await writeFile(join(f.request.directory,path),'{broken');await f.git('add',path);await f.git('commit','--signoff','-m','Damaged cycle cache');
   await f.git('push','--porcelain',f.request.remote,'HEAD:refs/heads/steward/release-state');await f.fetchState();
   const snapshot=await readReleaseRecords({directory:f.request.directory,targetRef:'steward/release-state',repositoryId:f.request.repositoryId});
-  if(missingBudget){await expect(recoverReleaseCaches(f.request,snapshot,{io:f.io})).rejects.toThrow('original failure budget unknown');expect(await f.stateHead()).toBe(snapshot.head);}
+  if(missingBudget){await expect(recoverReleaseCaches(f.request,snapshot,{io:f.io})).rejects.toThrow('original native evidence unknown');expect(await f.stateHead()).toBe(snapshot.head);}
   else {const repaired=await recoverReleaseCaches(f.request,snapshot,{io:f.io});expect(repaired.snapshot.cycles[0].value).toEqual(cycle);expect(repaired.snapshot.repository).toEqual(snapshot.repository);expect(await f.git('show',`${repaired.snapshot.head}:${path}`)).toBe(bytes.trim());}
 });

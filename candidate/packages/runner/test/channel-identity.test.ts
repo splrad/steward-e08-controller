@@ -50,7 +50,7 @@ it('records native R drift before an unrelated state append, while unchanged R s
 it.each(['moved','human','source','targets','input','branch','controller'])('rejects %s channel source before any business or secret use',async kind=>{
   const f=fixture();
   if(kind==='moved')f.run.head_sha='f'.repeat(40);
-  if(kind==='human')f.run.triggering_actor={id:7};
+  if(kind==='human')f.run.actor={id:7};
   if(kind==='source')f.context.cycle.deliveryConfigSha='f'.repeat(40);
   if(kind==='targets')f.inputs.targets_json=f.inputs.targets_json.replace('winget','ghcr-assets');
   if(kind==='input')(f.inputs as any).command='shell';

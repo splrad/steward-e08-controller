@@ -96,8 +96,8 @@ it('connects native inspection to a real fast-forward Git archive and keeps the 
 it('the built fixed CLI reaches the real Git bridge without depending on an emitted ncc asset',async()=>{
   const f=await gitFixture(),context=join(f.root,'context.json'),output=join(f.root,'output.json');await writeFile(context,JSON.stringify(f.input));
   const args=[resolve('packages/runner/dist/index.js'),'release','candidate','--context',context,'--output',output];permitOfflineCommand(process.execPath,args);
-  await expect(promisify(execFile)(process.execPath,args,{cwd:process.cwd(),env:isolatedBuildEnvironment(process.env,join(f.root,'profile')),windowsHide:true})).rejects.toMatchObject({code:75});
-  expect(JSON.parse(await readFile(output,'utf8'))).toMatchObject({status:'UNKNOWN',reason:'HISTORICAL_OBLIGATIONS',history:{reason:'RELEASE_ADOPTION_OR_HISTORY_UNPROVEN'}});
+  await promisify(execFile)(process.execPath,args,{cwd:process.cwd(),env:isolatedBuildEnvironment(process.env,join(f.root,'profile')),windowsHide:true});
+  expect(JSON.parse(await readFile(output,'utf8'))).toMatchObject({status:'WAIT',reason:'CANDIDATE_SCOPED_READ_CREDENTIAL_REQUIRED'});
 });
 it.each([false,true])('persists canonical dispatch through real fast-forward commits without a duplicate send; concurrent=%s',async concurrent=>{
   const f=await gitFixture(true),original=f.native.io.request;let sends=0;
@@ -131,6 +131,8 @@ it.each([false,true])('persists canonical dispatch through real fast-forward com
 it('the actual publication bridge adopts private BUSINESS_STARTED bytes before its publisher and blocks a repeated wake',async()=>{
   const f=await gitFixture(false,native=>Object.assign(native.context.cycle.units[0]!,{manifestDigest:digest('manifest'),notesDigest:digest('notes'),
     assets:[{id:'app',path:'app.zip',size:1,sha256:digest('f')}]}));
+  f.native.overrides.set('GET /repos/example/product/releases/tags/v1.0.0',f.native.response({},404));
+  f.native.overrides.set('GET /repos/example/product/releases?per_page=100',f.native.response([]));
   const sha=f.native.context.cycle.controllerSha,run={id:900,repository:{id:1296724484},head_repository:{id:1296724484},workflow_id:20,path:'.github/workflows/release.yml',event:'schedule',
     head_sha:sha,head_branch:'main',actor:{id:81},triggering_actor:{id:81},run_attempt:1,status:'in_progress',conclusion:null,created_at:NOW,updated_at:NOW,display_title:'Release'};
   const job={id:901,run_id:900,run_attempt:1,head_sha:sha,name:'release-coordinator',status:'in_progress',conclusion:null,started_at:NOW,completed_at:null,
@@ -152,6 +154,17 @@ it('the actual publication bridge adopts private BUSINESS_STARTED bytes before i
   const second=await releaseCommand('publish',{...f.input,directory:f.remote},options);expect(second).toMatchObject({status:'WAIT',reason:'RUN_IN_FLIGHT',publishInvoked:false});expect(invoked).toBe(1);
   const readback=await readReleaseRecords({directory:f.remote,targetRef:'steward/release-state',repositoryId:1});
   expect(readback.domainRecords.filter((record:any)=>record.path.startsWith('evidence/publication/')&&record.value.startEvidencePath===null)).toHaveLength(1);
+  const nextCycle={...structuredClone(f.native.context.cycle),id:`pr-13-${'d'.repeat(40)}`,prNumber:13,sourceSha:'d'.repeat(40),dispatches:[],publications:[]};
+  const nextFile=f.file(`cycles/${nextCycle.id}.json`,nextCycle);
+  await writeReleaseRecords({directory:join(f.root,'next-cycle'),remote:f.remote,repositoryId:1,defaultBranch:'main',targetRef:'steward/release-state',writer:'release',
+    expectedHead:readback.head,allowedPaths:[nextFile.path],changes:[nextFile],identity:{name:'Offline Evidence',email:'evidence@example.invalid'}});
+  const serialized=await releaseCommand('publish',{...f.input,directory:f.remote,cycleId:nextCycle.id},options);
+  expect(serialized).toMatchObject({status:'WAIT',reason:'PUBLICATION_IN_FLIGHT',publishInvoked:false});expect(invoked).toBe(1);
+  Object.assign(run,{status:'completed',conclusion:'failure'});Object.assign(job,{status:'completed',conclusion:'failure',completed_at:NOW});
+  Object.assign(job.steps[0]!,{conclusion:'failure',completed_at:NOW});
+  const failed=await releaseCommand('publish',{...f.input,directory:f.remote},{...options,centralInvocation:{...options.centralInvocation,runId:999}});
+  expect(failed,JSON.stringify(failed)).toMatchObject({status:'BLOCKED',reason:'NATIVE_MAINTENANCE_REQUIRED',publishInvoked:false});expect(invoked).toBe(1);
+
 // This fixture performs multiple isolated Git publications and complete history
 // readbacks. Windows process startup alone approached 60s in prior full runs.
 },process.platform==='win32'?120_000:60_000);
@@ -199,17 +212,15 @@ it('withholds rerun when Git was adopted but native ref visibility was lost, the
   expect(f.native.calls.filter(call=>call.startsWith('POST'))).toHaveLength(1);
   expect((await readReleaseRecords({directory:f.remote,targetRef:'steward/release-state',repositoryId:1})).head).toBe(persisted.head);
 });
-it('adopts retry-limit evidence in a second real fast-forward commit and reads every original attempt back',async()=>{
+it('archives original native evidence and stops outside the rerun window without a replacement Run',async()=>{
   const f=await gitFixture();f.input.runId=100;
   const result=await inspectReleaseEvidence(f.input,{io:f.native.io,now:()=> '2026-11-26T00:02:00.000Z'});
-  expect(result).toMatchObject({status:'BLOCKED',reason:'BUILD_CANNOT_CONTINUE'});
+  expect(result).toMatchObject({status:'BLOCKED',reason:'NATIVE_MAINTENANCE_REQUIRED'});
   const readback=await readReleaseRecords({directory:f.remote,targetRef:'steward/release-state',repositoryId:1});
-  const proof=readback.domainRecords.find((record:any)=>record.path.startsWith('evidence/retry-limit/'));
-  expect(proof.value.reason).toBe('AGE');expect(proof.value.firstRun.id).toBe(100);
-  expect(proof.value.attemptEvidencePaths).toHaveLength(1);
-  expect(readback.domainRecords.some((record:any)=>record.path===proof.value.attemptEvidencePaths[0])).toBe(true);
+  expect(readback.domainRecords.some((record:any)=>record.path.startsWith('evidence/retry-limit/'))).toBe(false);
+  expect(readback.domainRecords.some((record:any)=>record.path.startsWith('evidence/native/100-1/'))).toBe(true);
   expect(readback.cycles[0].value).toEqual(f.native.context.cycle);
   expect(f.native.calls.some(call=>call.startsWith('POST'))).toBe(false);
   const parent=await f.git('-C',f.remote,'show','-s','--format=%P',readback.head);
-  expect(await f.git('-C',f.remote,'show','-s','--format=%P',parent)).toBe(f.initial.head);
+  expect(parent).toBe(f.initial.head);
 },60_000);

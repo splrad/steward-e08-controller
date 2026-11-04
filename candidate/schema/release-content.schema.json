@@ -7,7 +7,10 @@
       "additionalProperties": false,
       "properties": {
         "schemaVersion": {
-          "const": 1
+          "enum": [
+            1,
+            2
+          ]
         },
         "repositoryId": {
           "type": "integer",
@@ -128,7 +131,8 @@
                 "enum": [
                   "CONTEXT",
                   "DIFF",
-                  "COMPOSE"
+                  "COMPOSE",
+                  "DRAFT"
                 ]
               },
               "unitIds": {
@@ -304,9 +308,7 @@
               "attempts",
               "nextCheckAt",
               "resultPath",
-              "errorCode",
-              "parentId",
-              "childIds"
+              "errorCode"
             ]
           }
         }

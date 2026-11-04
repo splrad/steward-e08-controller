@@ -19,6 +19,12 @@ it('published reentry is entirely read-only', async () => {
   const f = await fixture(); await f.preload(); Object.assign(f.release, { draft: false, immutable: true, body: await readFile(join(f.target.directory,'release-notes.md'),'utf8') });
   await f.adapter.publish(f.target); expect(writes(f)).toHaveLength(0);
 });
+it('verifies every private formal asset with authorized reads and preserves the read-only path',async()=>{
+  const f=await fixture();f.state.private=true;await f.preload();
+  Object.assign(f.release,{draft:false,immutable:true,body:await readFile(join(f.target.directory,'release-notes.md'),'utf8')});
+  await f.adapter.verify(f.target);
+  expect(f.downloads).toHaveLength(7);expect(f.downloads.every(value=>value.anonymous===false)).toBe(true);expect(writes(f)).toHaveLength(0);
+});
 it.each(['run','attempt','repository','trigger'])('rejects a different attestation %s before writes', async kind => {
   const f = await fixture();
   if (kind === 'run') f.state.invocation = f.state.invocation.replace('/runs/10/', '/runs/11/');

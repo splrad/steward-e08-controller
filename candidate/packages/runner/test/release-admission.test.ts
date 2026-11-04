@@ -1,8 +1,19 @@
+import {createHash} from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
-import { pipelineIdentity, pipelineNotes, mergedBuildCycle } from '../src/release-pipeline.js';
+import { pipelineIdentity, pipelineNotes, mergedBuildCycle, assertProductDelivery } from '../src/release-pipeline.js';
 import { parsePipelineRecord, pipelineSource } from '../src/release-pipeline-record.js';
 import { productPipelineFixture } from './product-pipeline-fixture.js';
 afterEach(() => vi.restoreAllMocks());
+it.each(['github-release','ghcr','unknown'])('rejects an external channel with no fixed implementation: %s',id=>{
+  expect(()=>assertProductDelivery({units:[{id:'app',path:'.',notesPath:'.release-notes/app.md',assets:[],channels:[{id,required:true,location:'fixture'}]}]})).toThrow('fixed product implementation');
+});
+it.each(['complete','deleted','optional','wrong-unit'])('LayerScape preserves its two explicit required channels: %s',kind=>{
+  const delivery={units:[{id:kind==='wrong-unit'?'other':'layerscape',path:'.',notesPath:'.release-notes/layerscape.md',assets:[],
+    channels:[{id:'ghcr-assets',required:true,location:'fixture'},{id:'winget',required:kind!=='optional',location:'fixture'}]}]};
+  if(kind==='deleted')delivery.units[0]!.channels.pop();
+  if(kind==='complete')expect(()=>assertProductDelivery(delivery,'splrad/LayerScape')).not.toThrow();
+  else expect(()=>assertProductDelivery(delivery,'splrad/LayerScape')).toThrow('required delivery obligations');
+});
 it.each(['complete', 'missing-unit', 'missing-producer', 'extra-asset'])('admits native two-unit source only with its complete frozen set: %s', async kind => {
   const f = productPipelineFixture(1, true);
   if (kind === 'missing-unit') f.context.cycle.units.pop();
@@ -19,7 +30,7 @@ it('admits current canonical source without a Release, catalog or tag read; nati
   const f = productPipelineFixture(2), before = JSON.stringify(f.input.state);
   const result = await pipelineIdentity(f.input, f.environment, f.gh, f.io);
   expect(result.status).toBe('ADMITTED'); if (result.status !== 'ADMITTED') throw new Error('fixture admission');
-  expect(result.budget.remaining).toBe(2); expect(result.record.runAttempt).toBe(2);
+   expect(result.record.runAttempt).toBe(2);
   expect(parsePipelineRecord(result.record)).toEqual(result.record);
   expect(pipelineSource(result.record, 'app').ref).toBe(f.environment.GITHUB_REF);
   expect(f.nativeCalls.some(path => /releases|catalog|tags|compare|pulls/.test(path))).toBe(false);
@@ -49,13 +60,13 @@ it.each(['valid', 'unit', 'template', 'version', 'compare'])('renders reviewed n
   expect(JSON.stringify(f.source)).toBe(before);
 });
 it('keeps two unit asset sets separate and requires every frozen Release ID in publish input', async () => {
-  const f = productPipelineFixture(), result = await pipelineIdentity(f.input, f.environment, f.gh, f.io);
+  const f = productPipelineFixture(1,true), result = await pipelineIdentity(f.input, f.environment, f.gh, f.io);
   if (result.status !== 'ADMITTED') throw new Error('fixture admission');
   const build = result.record;
-  build.delivery.units.push({ ...structuredClone(build.delivery.units[0]!), id: 'other', path: 'packages/other' });
-  build.units.push({ ...structuredClone(build.units[0]!), id: 'other', tag: 'other-v1.0.0',
-    builds: [{ id: 'windows-x64', jobName: 'build/windows-x64/other', expectedArtifacts: ['app'] }] });
   expect(parsePipelineRecord(build)).toEqual(build);
+  const duplicate=structuredClone(build);duplicate.delivery.units[1]!.assets[0]!.name=duplicate.delivery.units[0]!.assets[0]!.name;
+  duplicate.units[1]!.assets[0]!.name=duplicate.units[0]!.assets[0]!.name;
+  expect(()=>parsePipelineRecord(duplicate)).toThrow('duplicate product asset');
   const releases = build.units.map((unit, index) => ({ unitId: unit.id, releaseId: 200 + index, manifestDigest: String(index).repeat(64) }));
   expect(parsePipelineRecord({ schemaVersion: 1, kind: 'publish', build, releases }).kind).toBe('publish');
   expect(() => parsePipelineRecord({ schemaVersion: 1, kind: 'publish', build, releases: releases.slice(0, 1) })).toThrow('release set');
@@ -76,15 +87,17 @@ it('merged handoff compares the complete product tree and creates no tag or Rele
   expect(() => mergedBuildCycle({ ...input, reviewedTree: 'b'.repeat(40) })).toThrow('product tree');
   expect(() => mergedBuildCycle({ ...input, units: [{ ...input.units[0]!, path: 'wrong' }] })).toThrow('unit source');
 });
-it.each(['unbound', 'duplicate', 'actor', 'unknown', 'exhausted'])('stops %s before product work', async kind => {
-  const f = productPipelineFixture(kind === 'exhausted' ? 4 : 1);
-  if (kind === 'unbound') { f.request.canonicalRunId = null; f.request.nativeResponseEvidencePath = null; }
-  if (kind === 'duplicate') f.environment.GITHUB_RUN_ID = '101';
-  if (kind === 'actor') f.runs.get(1).triggering_actor.id = 44151430;
-  if (kind === 'unknown') f.overrides.set('GET /repos/example/product/actions/runs/100', f.response({}, 403));
-  const result = await pipelineIdentity(f.input, f.environment, f.gh, f.io);
-  expect(result.status).toBe(kind === 'unbound' ? 'NOT_BOUND' : kind === 'unknown' ? 'UNKNOWN' : 'REJECTED');
-  expect(result.record).toBeUndefined();
+it.each(['unbound','duplicate'])('stops %s before product work',async kind=>{
+  const f=productPipelineFixture();
+  if(kind==='unbound'){f.request.canonicalRunId=null;f.request.nativeResponseEvidencePath=null;}
+  else f.environment.GITHUB_RUN_ID='101';
+  const result=await pipelineIdentity(f.input,f.environment,f.gh,f.io);
+  expect(result.status).toBe(kind==='unbound'?'NOT_BOUND':'REJECTED');expect(result.record).toBeUndefined();
+});
+it('admits an original Run rerun by a maintainer without replaying failure history',async()=>{
+  const f=productPipelineFixture(4);f.runs.get(4).triggering_actor.id=44151430;
+  const io={request:async()=>{throw Error('past-attempt inventory must not be fetched for admission');}};
+  expect((await pipelineIdentity(f.input,f.environment,f.gh,io)).status).toBe('ADMITTED');
 });
 it.each(['source', 'controller', 'ref', 'repository', 'run-attempt', 'delivery', 'native-version', 'missing-template', 'rp-path', 'fork'])('rejects %s drift using the current source', async kind => {
   const f = productPipelineFixture();
@@ -111,4 +124,17 @@ it.each(['releaseId', 'policySha', 'admitted', 'command', 'wrong-ref', 'missing-
   if (kind === 'duplicate-unit') record.units.push(record.units[0]);
   if (kind === 'author-as-contributor') record.units[0].contributors.push({ id: 44151430, login: 'axiomoth', profileUrl: 'https://github.com/axiomoth', avatarUrl: 'https://avatars.githubusercontent.com/u/44151430?v=4', alt: 'axiomoth' });
   expect(() => parsePipelineRecord(record)).toThrow();
+});
+
+it('builds a registered earlier cycle from its exact merged archive after candidate replacement',async()=>{
+  const f=productPipelineFixture(),repository=f.input.state.repository as any,chunk=f.input.state.domainRecords[0]!.value as any;
+  const candidate={...repository.candidate,generatedSnapshotPath:`generated/${chunk.candidateId}/generated.json`};
+  const value={schemaVersion:1,cycleId:f.context.cycle.id,sourceSha:f.context.cycle.sourceSha,stateCommit:f.input.state.head,candidate,
+    session:JSON.parse(chunk.content),pull:{number:12,head:candidate.publishedHead,branch:candidate.branch,base:'main',repositoryId:1,mergedAt:'2026-10-26T00:00:00Z',mergeCommitSha:f.context.cycle.sourceSha},
+    documents:[{path:`generated/${chunk.candidateId}/session.json`,sha256:chunk.documentDigest},{path:candidate.generatedSnapshotPath,sha256:'a'.repeat(64)}]};
+  const content=JSON.stringify(value);
+  f.input.state.domainRecords=[{path:`generated/${chunk.candidateId}/cycles/${f.context.cycle.id}.json`,commit:f.input.state.head,
+    value:{...chunk,documentKind:'merged-candidate',content,documentDigest:createHash('sha256').update(content).digest('hex')}}];
+  repository.candidate=null;repository.activeCycleId=`pr-13-${'d'.repeat(40)}`;
+  expect((await pipelineIdentity(f.input,f.environment,f.gh,f.io)).status).toBe('ADMITTED');
 });

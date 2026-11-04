@@ -53,12 +53,13 @@ it.each(['2.5.0','9.2.2','1.0.1'])('v1.54 rejects first-release Release-As %s be
   await expect(generateCandidate(B,f.options)).rejects.toThrow('CANDIDATE_FIRST_RELEASE_VERSION');
   expect(f.files.get('VERSION')).toBe('9.2.2\n');
 });
-it('v1.54 requires complete first-release history even when the candidate has the expected version',async()=>{
-  const f=firstLayerScape();f.commits.pop();await expect(generateCandidate(B,f.options)).rejects.toThrow('CANDIDATE_COMMIT_COVERAGE');
+it('uses native RP first-release calculation without a second per-commit coverage proof',async()=>{
+  const f=firstLayerScape();f.commits.pop();await expect(generateCandidate(B,f.options)).resolves.toMatchObject({status:'READY'});
 });
-it.each(['manifest','extra-manifest','root-bootstrap','package-draft','package-force','wrong-target','existing-release','existing-tag'])('v1.54 rejects first-release residue: %s',async kind=>{
+it.each(['manifest','manifest-current','extra-manifest','root-bootstrap','package-draft','package-force','wrong-target','existing-release','existing-tag'])('v1.54 rejects first-release residue: %s',async kind=>{
   const f=firstLayerScape(),config=JSON.parse(f.facts.config);
   if(kind==='manifest')f.facts.manifest=JSON.stringify({'.':'9.2.2'});
+  if(kind==='manifest-current')f.facts.manifest=JSON.stringify({'.':'1.0.0'});
   if(kind==='extra-manifest')f.facts.manifest=JSON.stringify({other:'9.2.2'});
   if(kind==='root-bootstrap')config['bootstrap-sha']=C;
   if(kind==='package-draft')config.packages['.'].draft=true;
@@ -69,6 +70,14 @@ it.each(['manifest','extra-manifest','root-bootstrap','package-draft','package-f
   f.facts.config=JSON.stringify(config);f.files.set('release-please-config.json',f.facts.config);f.files.set('.release-please-manifest.json',f.facts.manifest);
   await expect(generateCandidate(B,f.options)).rejects.toThrow('CANDIDATE_FIRST_RELEASE_INPUT');
   expect(f.files.get('VERSION')).toBe('9.2.2\n');
+});
+it('continues LayerScape from its recorded release boundary after the first release',async()=>{
+  const f=fixture();Object.assign(f.client.repository,{owner:'splrad',repo:'LayerScape'});
+  f.units[0]!.id='layerscape';
+  const result=await generateCandidate(B,f.options);
+  expect(result.status).toBe('READY');
+  if(result.status!=='READY')throw Error('expected candidate');
+  expect(result.snapshot.units).toEqual([{id:'layerscape',path:'.',version:'1.1.0',tag:'v1.1.0'}]);
 });
 it.each([false, true])('uses actual upstream generation and manifest versions for multi=%s', async multi => {
   const f = fixture(multi), result = await generateCandidate(B, f.options);
@@ -113,9 +122,9 @@ it('reaches the real release boundary beyond default commit search depths', asyn
   const result = await generateCandidate(B, f.options);
   expect(result.status).toBe('READY'); expect(result.status === 'READY' && result.snapshot.units[0]!.version).toBe('1.1.0');
 });
-it('rejects a truncated iterator even when upstream emits only a warning', async () => {
+it('uses native RP iterator semantics without a second all-commit coverage gate', async () => {
   const f = fixture(); f.commits.pop();
-  await expect(generateCandidate(B, f.options)).rejects.toThrow('CANDIDATE_COMMIT_COVERAGE');
+  await expect(generateCandidate(B, f.options)).resolves.toMatchObject({status:'READY'});
 });
 it('projects Go path tags and Python prereleases through their native upstream strategies', async () => {
   const f = fixture(true), config = JSON.stringify({ 'separate-pull-requests': false, packages: {

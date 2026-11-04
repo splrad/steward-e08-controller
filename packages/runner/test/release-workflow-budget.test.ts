@@ -24,8 +24,9 @@ it('connects the fixed coordinator and independent native health job within the 
   expect(d.jobs['release-coordinator']['timeout-minutes']).toBe(45);
   expect(d.jobs['release-coordinator'].steps.at(-1).run).toBe('node scripts/release-coordinator.mjs');
   expect(JSON.stringify(d.jobs['release-coordinator'])).not.toMatch(/release-plan|release-please-action|matrix|upload-artifact/);
-  const updates=await load('update-dependencies.yml');
-  for(const document of [d,updates]) {
+  const managed=await load('sync-managed.yml');
+  expect(managed.on.schedule).toEqual([{cron:'37 * * * *'}]);
+  for(const document of [d,managed]) {
     for(const [id,business] of Object.entries(document.jobs) as [string,any][])if(id!=='automation-health') {
       expect([business.needs??[]].flat()).not.toContain('automation-health');
     }
@@ -35,5 +36,7 @@ it('connects the fixed coordinator and independent native health job within the 
     expect(job.concurrency).toEqual({group:'steward-automation-health','cancel-in-progress':false});
     expect(JSON.stringify(job)).not.toMatch(/secrets\.|checkout|mise|packages\/runner/);
   }
-  expect(updates.jobs.targets.steps.map((step:any)=>step.name)).toEqual(expect.arrayContaining(['update-targets-empty','update-targets-found']));
+  expect((await load('update-dependencies.yml')).jobs['automation-health']).toBeUndefined();
+  const behavior=(job:unknown)=>JSON.parse(JSON.stringify(job,(_key,value)=>typeof value==='string'?value.split('\n').filter(line=>!/^\s*#/.test(line)).join('\n'):value));
+  expect(behavior(d.jobs['automation-health'])).toEqual(behavior(managed.jobs['automation-health']));
 });

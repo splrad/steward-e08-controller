@@ -28,21 +28,16 @@ function fixture() {
   return { workspace, git, commit, base, options };
 }
 describe('完整 Git 发布输入', { timeout: 30_000 }, () => {
-  it('E04 collects more than 32 MiB of UTF-8 text into bounded payloads and records explicit UTF-16 conversion', async () => {
-    const f = fixture(), large = '中文源码\n'.repeat(3 * 1024 * 1024);
-    expect(Buffer.byteLength(large)).toBeGreaterThan(32 * 1024 * 1024);
-    f.commit('large.txt', large, 'feat: direct source');
-    const utf16 = Buffer.from('\ufeff中文说明\n', 'utf16le'); f.commit('wide.txt', utf16, '说明更新');
-    const collected = await collectContentInput({ directory: join(f.workspace, 'collected'), candidateId: 'd'.repeat(64), configDigest: 'e'.repeat(64), units: [f.options()] });
-    const parts = collected.sources.filter(s => s.path === 'large.txt');
-    expect(parts[0]!.start).toBe(0); expect(parts.at(-1)!.end).toBe(Buffer.byteLength(large));
-    expect(parts.map(p => p.text).join('')).toBe(large);
-    const wide = collected.sources.filter(s => s.path === 'wide.txt'); expect(wide.map(p => p.text).join('')).toBe('\ufeff中文说明\n');
-    expect(wide[0]!.encoding).toBe('utf-16le-to-utf8'); expect(wide[0]!.sha256).toBe(createHash('sha256').update(utf16).digest('hex'));
-    const work = await planContentBatches(collected.input, collected.sources, { manifests: collected.manifests, gaps: collected.gaps });
-    expect(Object.values(work.payloads).every(p => Buffer.byteLength(contentWireInput(p)) <= 24 * 1024)).toBe(true);
-    expect(work.input.batches.length).toBeGreaterThan(1500);
-  }, 60_000);
+  it('draft input retains commit IDs for attribution without duplicating history in model input', async () => {
+    const f=fixture(); f.commit('large.txt','未要求逐源码模型覆盖。'.repeat(10000),'feat: new feature');
+    const collected=await collectContentInput({directory:join(f.workspace,'collected'),candidateId:'d'.repeat(64),configDigest:'e'.repeat(64),units:[{...f.options(),contextPaths:['README.md']}]});
+    expect(collected.sources.some(s=>s.path==='large.txt')).toBe(false);
+    expect(collected.sources.some(s=>s.path==='commits'||s.text.includes('feat: new feature'))).toBe(false);
+    expect(collected.sources.find(s=>s.path==='README.md')!.text).toContain('Usage');
+    expect(collected.manifests[0]!.commits).toHaveLength(1);
+    const work=await planContentBatches(collected.input,collected.sources,{manifests:collected.manifests,gaps:[]});
+    expect(work.input.batches).toHaveLength(1);expect(work.input.batches[0]!.stage).toBe('DRAFT');
+  });
   it.each([
     ['web-sdk', 'packages/web-sdk', 'web-sdk-v1.2.0-beta.1', '1.2.0-beta.1'],
     ['python-sdk', 'packages/python-sdk', 'python-sdk-v2.0.0-rc.2', '2.0.0-rc.2'],

@@ -115,7 +115,7 @@ it.each(['present', 'absent', 'expired', 'duplicate', 'wrong-run', 'wrong-source
   expect(calls.every(call => call[0] === 'api' && !call.includes('--method'))).toBe(true);
 });
 
-it.each(['valid', 'tampered-bytes', 'different-policy', 'different-descriptor', 'different-asset-id', 'different-producer', 'future-producer'])('recovers and verifies frozen final bytes: %s', async kind => {
+it.each(['valid', 'cross-run-producer', 'tampered-bytes', 'different-policy', 'different-descriptor', 'different-asset-id', 'different-producer', 'future-producer'])('recovers and verifies frozen final bytes: %s', async kind => {
   const root = await mkdtemp(join(tmpdir(), 'frozen-final-')); roots.push(root);
   const original = join(root, 'original'); await mkdir(original);
   await writeFile(join(original, 'app.exe'), 'original producer bytes');
@@ -126,6 +126,7 @@ it.each(['valid', 'tampered-bytes', 'different-policy', 'different-descriptor', 
     descriptorSha256: kind === 'different-descriptor' ? 'a'.repeat(64) : record.admitted.descriptorSha256, templateSha256: record.admitted.templateSha256,
     runId: 42, attempt: 1, toolLocks: record.toolLocks, producers: [{ buildId: 'windows', jobId: 11, attempt: 1, artifactId: 100 }],
     artifacts: [{ id: 'app', kind: 'executable', mediaType: 'application/octet-stream', platform: 'windows', architecture: 'x64', ...await fileDigest(original, 'app.exe') }], evidence: [] };
+  if (kind === 'cross-run-producer')Object.assign(pending.producers[0]!,{runId:77,attempt:5});
   if (kind === 'different-asset-id') pending.artifacts[0]!.id = 'other';
   if (kind === 'different-producer') pending.producers[0]!.buildId = 'other';
   if (kind === 'future-producer') pending.producers[0]!.attempt = 2;
@@ -139,7 +140,7 @@ it.each(['valid', 'tampered-bytes', 'different-policy', 'different-descriptor', 
     if (kind === 'tampered-bytes') await writeFile(join(input.directory, 'app.exe'), 'regenerated different bytes');
   });
   const output = join(root, 'recovered');
-  if (kind === 'valid') {
+  if (kind === 'valid'||kind==='cross-run-producer') {
     expect(await pipelineRecoverFinal(historicalPipelineSource(record), output, root, join(root, 'home'), gh, fixtureNativePages(gh))).toEqual({ found: true, artifactId: 101, digest: frozen.digest });
     for (const name of await readdir(original)) expect(await readFile(join(output, name))).toEqual(await readFile(join(original, name)));
     expect(JSON.parse(await readFile(join(output, 'artifact-manifest.json'), 'utf8')).attempt).toBe(1);
