@@ -43,7 +43,7 @@ export async function serviceReleaseWake(request,refresh,invoke,clock=Date.now) 
     snapshot=await refresh();
     const cycle=snapshot.cycles.find(value=>value.value.id===registered.id)?.value;
     for(const dispatch of cycle?.dispatches??[])if(dispatch.canonicalRunId!==null) {
-      await refresh();results.push(await invoke('rerun',{...request,runId:dispatch.canonicalRunId}));
+      results.push(await invoke('rerun',{...request,runId:dispatch.canonicalRunId}));snapshot=await refresh();
     }
   }
   if(!results.length)return snapshot.cycles.length && candidate.status==='WAIT' && candidate.reason==='UNCHANGED' && !snapshot.repository.candidate

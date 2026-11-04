@@ -94,6 +94,22 @@ it('prepares the next candidate and services both a new release and an old pendi
   expect(calls).toEqual(['candidate:new','dispatch-channel:old','observe-channel:old','rerun:old','dispatch-build:new','publish:new','dispatch-channel:new','observe-channel:new']);
 });
 
+it('refreshes archived rerun state before another rerun or the next cycle dispatch',async()=>{
+  let remoteHead=0,localHead=-1,refreshes=0;
+  const calls:string[]=[],snapshot={repository:{activeCycleId:'new'},cycles:[
+    {value:{id:'old',completedEvidencePath:'old-completion',dispatches:[{canonicalRunId:100},{canonicalRunId:101}]}},
+    {value:{id:'new',completedEvidencePath:null,dispatches:[]}}],domainRecords:[]};
+  await serviceReleaseWake({},async()=>{refreshes++;localHead=remoteHead;return structuredClone(snapshot);},async(command:string,input:any)=>{
+    calls.push(`${command}:${input.cycleId}`);
+    if(command==='rerun'||command==='dispatch-build')expect(localHead).toBe(remoteHead);
+    if(command==='rerun')remoteHead++;
+    return {status:'WAIT',publishInvoked:false};
+  });
+  expect(calls).toEqual(['candidate:new','dispatch-channel:old','observe-channel:old','rerun:old','rerun:old',
+    'dispatch-build:new','publish:new','dispatch-channel:new','observe-channel:new']);
+  expect(localHead).toBe(2);expect(refreshes).toBe(11);
+});
+
 it('honors an old cycle read backoff while preparing and building the next registered candidate',async()=>{
   const calls:string[]=[],snapshot={repository:{activeCycleId:'new'},cycles:[{value:{id:'old'}},{value:{id:'new',dispatches:[]}}],
     domainRecords:[{path:'evidence/reads/old.json',value:{cycleId:'old',observedAt:new Date(START).toISOString(),nextCheckAt:new Date(START+60_000).toISOString()}}]};
