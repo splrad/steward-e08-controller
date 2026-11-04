@@ -23,7 +23,7 @@ async function fixture(){
   await git('init','--initial-branch=steward/release-state');await git('config','user.name','Offline Fixture');await git('config','user.email','fixture@example.invalid');
   const save=async()=>{await git('add','--','state.json','cycles');await git('commit','--signoff','-m','Offline state fixture');return git('rev-parse','HEAD');};
   await writeFile(join(root,'state.json'),JSON.stringify(repository));await mkdir(join(root,'cycles'));await writeFile(join(root,'cycles',cycleId+'.json'),JSON.stringify(cycle));
-  const head=await save();return {root,git,save,head,input:{directory:root,targetRef:'steward/release-state',repositoryId:1}};
+  const head=await save();return {root,git,save,head,input:{directory:root,targetRef:'steward/release-state',repositoryId:1,includeHistory:true}};
 }
 it('reads exact Git blobs and leaves the working tree, branch and source bytes unchanged',async()=>{
   const f=await fixture(),before=await f.git('status','--porcelain');const result=await readReleaseRecords(f.input);
@@ -90,3 +90,26 @@ it('rejects arbitrary refs and unfixed write command arguments',async()=>{
   await expect(readReleaseRecords({directory:'.',targetRef:'main',repositoryId:1})).rejects.toThrow('target');
   await expect(main(['write','--directory','.','--target-ref','main','--repository-id','1','--output','ignored'])).rejects.toThrow('write arguments');
 });
+it('keeps an original repair decision immutable after adopting it',async()=>{
+  const f=await fixture(),decision={eventId:1,actorId:99,createdAt:'2026-10-27T00:00:00Z',cycleId,sourceSha:S,
+    unitIds:['app'],releaseIds:[],tags:['v1.2.3'],evidencePath:'generated/repair.json'};
+  await writeFile(join(f.root,'cycles',cycleId+'.json'),JSON.stringify({...cycle,approvedRepairDecision:decision}));const adopted=await f.save();
+  const accepted=await readReleaseRecords(f.input);
+  expect(accepted.cycleHistory.find((record:any)=>record.commit===adopted).value.approvedRepairDecision).toEqual(decision);
+  await writeFile(join(f.root,'cycles',cycleId+'.json'),JSON.stringify({...cycle,approvedRepairDecision:{...decision,eventId:2}}));await f.save();
+  await expect(readReleaseRecords(f.input)).rejects.toThrow('repair decision changed');
+},nativeGitTestTimeout);
+it('rejects a later cache that attaches a new parent to an existing ordinary cycle',async()=>{
+  const f=await fixture(),parent=`pr-1-${C}`,decision={eventId:1,actorId:99,createdAt:'2026-10-27T00:00:00Z',cycleId:parent,sourceSha:C,
+    unitIds:['app'],releaseIds:[],tags:['v1.0.0'],evidencePath:'generated/repair.json'};
+  await writeFile(join(f.root,'cycles',cycleId+'.json'),JSON.stringify({...cycle,repairOf:parent,approvedRepairDecision:decision}));await f.save();
+  await expect(readReleaseRecords(f.input)).rejects.toThrow('immutable cycle conflict');
+},nativeGitTestTimeout);
+
+it('normal reads use only registered current records; explicit recovery reads ancestors',async()=>{
+  const f=await fixture();await writeFile(join(f.root,'state.json'),JSON.stringify({...repository,revision:1}));const head=await f.save();
+  const current=await readReleaseRecords({...f.input,includeHistory:false});
+  expect(current.repository.revision).toBe(1);expect(current.repositoryHistory).toHaveLength(1);
+  expect(current.history.every((entry:any)=>entry.commit===head)).toBe(true);
+  const recovered=await readReleaseRecords(f.input);expect(recovered.repositoryHistory).toHaveLength(2);
+},nativeGitTestTimeout);

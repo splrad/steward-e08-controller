@@ -50,7 +50,7 @@ test('SDK capacity and output limits are explicit and always stop the client', a
     const f = fixture(setup); await assert.rejects(releaseNotes('generate', '{}', 'fixture-token', f.create), new RegExp(code)); assert.equal(f.events.at(-1), 'stop');
   }
 });
-test('oversized input never constructs the SDK client', async () => {
-  const f = fixture(); await assert.rejects(releaseNotes('generate', 'x'.repeat(24 * 1024 + 1), 'fixture-token', f.create), /CONTENT_INPUT_LIMIT/);
-  assert.deepEqual(f.events, []);
+test('curated input above the retired byte threshold reaches the SDK and retains service capacity errors', async () => {
+  const f = fixture(); const result=await releaseNotes('generate', 'x'.repeat(120 * 1024), 'fixture-token', f.create);
+  assert.equal(result.status,'RETURNED');assert.deepEqual(f.events,['start','session','send','stop']);
 });

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { decodeNativePublication, type NativePublication } from '../../core/src/native-evidence.js';
 import { type NativeAttemptSet, type NativeAttemptEvidence, type ArchivedAttempt } from '../../core/src/release-observation.js';
-import { NativeEvidenceReader, nativeRunFact, jobFact, EvidenceReadError, stableReleaseFacts, stableAssetFacts,
+import { NativeEvidenceReader, formalReleaseReader, nativeRunFact, jobFact, EvidenceReadError, stableReleaseFacts, stableAssetFacts,
   type EvidenceContext, type EvidenceTransport, type EvidenceStore, type ArchiveFile } from './native-release-evidence.js';
 
 const hash=(v:string|Uint8Array)=>createHash('sha256').update(v).digest('hex');
@@ -51,14 +51,16 @@ async function objects(context:EvidenceContext,io:EvidenceTransport):Promise<Nat
       check(Number.isSafeInteger(release.id)&&release.id>0&&release.tag_name===unit.tag&&release.author?.id===context.appBotId
         &&(unit.releaseId===null||release.id===unit.releaseId)&&typeof release.body==='string'&&hash(release.body)===unit.notesDigest,'release identity');
       check((await reader.json(`commits/${encodeURIComponent(unit.tag)}`)).sha===context.cycle.sourceSha,'tag source');
-      const assets=await reader.pages(`releases/${release.id}/assets`,''),bytes=[];
+      const assetReader=release.draft===false?await formalReleaseReader(context,io):reader;
+      check(same(stableReleaseFacts(release),stableReleaseFacts(await assetReader.json(path))),'release visibility changed');
+      const assets=await assetReader.pages(`releases/${release.id}/assets`,''),bytes=[];
       for(const asset of assets) {
-        const actual=await reader.downloadDigest(`releases/assets/${asset.id}`);
+        const actual=await assetReader.downloadDigest(`releases/assets/${asset.id}`);
         check(actual.size===asset.size&&unit.assets.some(value=>value.path===asset.name&&value.size===actual.size&&value.sha256===actual.digest),'release bytes');
         bytes.push([asset.id,asset.name,actual.size,actual.digest]);
       }
       check(new Set(assets.map(asset=>asset.name)).size===assets.length,'duplicate release asset');
-      check(same(stableReleaseFacts(release),stableReleaseFacts(await reader.json(path)))&&same(stableAssetFacts(assets),stableAssetFacts(await reader.pages(`releases/${release.id}/assets`,''))),'release changed');
+      check(same(stableReleaseFacts(release),stableReleaseFacts(await assetReader.json(path)))&&same(stableAssetFacts(assets),stableAssetFacts(await assetReader.pages(`releases/${release.id}/assets`,''))),'release changed');
       proof.digest=hash(JSON.stringify([stableReleaseFacts(release),bytes.sort((a,b)=>Number(a[0])-Number(b[0]))]));
       proof.status=release.draft===false&&release.immutable===true&&assets.length===unit.assets.length?'MATCH':'ABSENT';
     }catch(error) {

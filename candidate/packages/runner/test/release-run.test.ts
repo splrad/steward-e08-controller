@@ -84,7 +84,7 @@ it.each(['search','native-response'])('archives a moved source through %s only w
   const files=await readChannelSourceRejections(f.context,[],io,NOW,responses);expect(files).toHaveLength(1);
   const proof={path:files[0]!.path,commit:D,value:decodeNativeSourceRejection(Buffer.from(files[0]!.content))};
   expect(selectChannelDispatch(f.context,f.report.items,[],[proof]).kind).toBe('reselect');
-  expect((await inspectNativeCycle(f.context,[],f.io,NOW,{complete:true,observations:[],sourceRejections:[proof]})).budget.remaining).toBe(3);
+  expect((await inspectNativeCycle(f.context,[],f.io,NOW,{complete:true,observations:[],sourceRejections:[proof]})).readObservation.disposition).toBe('COMPLETE');
   expect(await readChannelSourceRejections(f.context,[proof],io,NOW,responses)).toEqual([]);
   if(responses.length){
     await expect(readChannelSourceRejections(f.context,[],io,NOW,[{...responses[0]!,path:'evidence/dispatch/'+'0'.repeat(64)+'.json'}])).rejects.toThrow('source response provenance');
@@ -184,4 +184,14 @@ it('requires actual verify-mode native job success for consumed bytes and record
   const result=channelBusinessResults(f.context,request,f.run,f.job,f.targets[0]!,NOW)[0]!;
   expect(result.execution.entry).toBe('channel');expect(result.execution.jobId).toBe(f.job.id);expect(result.execution.outcome).toBe('EFFECT_CONFIRMED');
   f.job.conclusion='failure';expect(()=>verifyChannelResult(f.context,request,f.run,f.job,payload)).toThrow();
+});
+
+it('selects exact-source producers from distinct Runs and records their actual identities',()=>{
+  const input=observation();input.jobs=input.jobs.filter(job=>job.conclusion==='success');
+  input.jobs[1]!.runId=77;input.jobs[1]!.attempt=5;
+  input.artifacts[1]!.runId=77;input.artifacts[1]!.name=producerArtifactName({...identity,runId:77},'linux',5);
+  const selected=selectReleaseProducers(unit,identity,input);
+  expect(selected.producers[1]).toEqual({buildId:'linux',jobId:22,runId:77,attempt:5,artifactId:202});
+  input.jobs.push({...input.jobs[1]!,id:99,runId:88});
+  expect(()=>selectReleaseProducers(unit,identity,input)).toThrow('ambiguous producer run');
 });

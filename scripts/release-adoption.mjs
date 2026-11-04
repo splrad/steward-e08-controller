@@ -59,6 +59,8 @@ export async function withReleaseAdoption(request,adoption,io,operation) {
       const S=pr.merge_commit_sha;
       const config=JSON.parse(await file(S,'release-please-config.json')),versions=JSON.parse(await file(S,'.release-please-manifest.json'));
       const sourceDelivery=parseDeliveryConfig(JSON.parse(await file(S,'.github/delivery.json')));
+      // Historical recovery verifies the obligations frozen at S. Current product
+      // onboarding requirements are enforced before admitting a new candidate.
       if(!cycle||cycle.sourceSha!==S||cycle.prNumber!==pr.number)fail('original cycle required');
       for(const target of cycle.units) {
         const unit=sourceDelivery.units.find(value=>value.id===target.id);
@@ -82,7 +84,7 @@ export async function withReleaseAdoption(request,adoption,io,operation) {
   }finally{await rm(home,{recursive:true,force:true});}
 }
 
-async function verifyBudgets(request,snapshot,io,centralIo,now) {
+async function verifyCurrentEvidence(request,snapshot,io,centralIo,now) {
   for(const {value:cycle} of snapshot.cycles) {
     const context={repository:request.repository,repositoryId:request.repositoryId,appBotId:request.appBotId,cycle};
     const publications=snapshot.domainRecords.filter(r=>r.path.startsWith('evidence/publication/')&&r.value.cycleId===cycle.id);
@@ -91,12 +93,19 @@ async function verifyBudgets(request,snapshot,io,centralIo,now) {
       {complete:true,publication,observations:snapshot.domainRecords.filter(r=>r.path.startsWith('evidence/reads/')).map(r=>r.value),
         retryLimits:snapshot.domainRecords.filter(r=>r.path.startsWith('evidence/retry-limit/')),sourceRejections:snapshot.domainRecords.filter(r=>r.path.startsWith('evidence/source-rejection/')),
         channelEvidence:snapshot.domainRecords.filter(r=>r.path.startsWith('evidence/channel/')||r.path.startsWith('evidence/channel-read/'))});
-    if(evidence.budget.remaining===null||evidence.readObservation.disposition!=='COMPLETE')fail('original failure budget unknown');
+    if(evidence.currentFacts.unknownEvidence.length||evidence.currentFacts.conflictEvidence.length||evidence.currentFacts.inFlightWaveKeys.length||evidence.readObservation.disposition!=='COMPLETE')fail('original native evidence unknown');
   }
 }
 
 /** Restore original cache bytes only. No empty state, new cycle or completion fact can be invented here. */
 export async function recoverReleaseCaches(request,snapshot,{token,io=nativeEvidenceTransport(token),centralIo,now=()=>new Date().toISOString()}={}) {
+  const missing=!snapshot.repository || snapshot.history.some(record=>record.status!=='DECODED')
+    || snapshot.repository.activeCycleId && !snapshot.cycles.some(record=>record.value.id===snapshot.repository.activeCycleId)
+    || snapshot.repository.lastCompletedCycleId && !snapshot.cycles.some(record=>record.value.id===snapshot.repository.lastCompletedCycleId);
+  if(missing) {
+    const {readReleaseRecords}=await import('./release-record.mjs');
+    snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId,includeHistory:true});
+  }
   if(snapshot.history.some(r=>r.path.startsWith('cycles/')&&!snapshot.cycles.some(c=>r.path===`cycles/${c.value.id}.json`)))fail('original cycle record unavailable');
   const paths=['state.json',...snapshot.cycles.map(r=>`cycles/${r.value.id}.json`)];
   const damaged=paths.filter(path=>!snapshot.history.some(r=>r.commit===snapshot.head&&r.path===path&&r.status==='DECODED'));
@@ -110,7 +119,7 @@ export async function recoverReleaseCaches(request,snapshot,{token,io=nativeEvid
         ||pr.base?.ref!==request.defaultBranch||!proof.reachable.includes(pr.merge_commit_sha))fail('recovery source identity');
       await proof.verifySource(pr,cycle);
     }
-    await verifyBudgets(request,snapshot,io,centralIo,now);
+    await verifyCurrentEvidence(request,snapshot,io,centralIo,now);
     const changes=[];
     const bytes=async oid=>{const blob=await proof.reader.json(`git/blobs/${oid}`);if(blob.encoding!=='base64')fail('recovery blob encoding');return Buffer.from(blob.content,'base64');};
     for(const path of damaged) {
@@ -146,7 +155,7 @@ export async function initializeReleaseAdoption(request,{token,io=nativeEvidence
     if(![200,404].includes(response.status))fail('state visibility unknown');
     let snapshot=null;
     if(response.status===200) {
-      snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId});
+      snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId,includeHistory:true});
       if(snapshot.head!==JSON.parse(Buffer.from(response.bytes).toString('utf8')).object?.sha||!snapshot.repository)fail('state source unknown');
       if(snapshot.repository.schemaVersion===3) {
         if(!same(snapshot.repository.releaseAdoption,request.releaseAdoption))return {status:'CONFLICT',reason:'RELEASE_ADOPTION_CHANGED'};
@@ -175,7 +184,7 @@ export async function initializeReleaseAdoption(request,{token,io=nativeEvidence
       const releases=await proof.reader.pages('releases',''),tags=await proof.reader.pages('tags','');
       if(releases.length||tags.length||discovered.size)fail('unrecorded release obligations');
     }
-    await verifyBudgets(request,view,io,centralIo,now);
+    await verifyCurrentEvidence(request,view,io,centralIo,now);
     const previous=snapshot?.repository;
     const repository=previous?{...previous,schemaVersion:3,releaseAdoption:request.releaseAdoption,revision:previous.revision+1}
       :{schemaVersion:3,repositoryId:request.repositoryId,defaultBranch:request.defaultBranch,revision:0,releaseAdoption:request.releaseAdoption,

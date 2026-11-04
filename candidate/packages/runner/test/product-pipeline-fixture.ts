@@ -17,7 +17,9 @@ export function productPipelineFixture(attempts = 1, twoUnits = false) {
     '.release-please-manifest.json': '{".":"1.0.0"}', VERSION: '1.0.0\n', 'global.json': '{}',
     '.github/release-template.md.mustache': readFileSync('templates/repository/.github/release-template.md.mustache', 'utf8') };
   if (twoUnits) {
+    delivery.units[0]!.path='packages/app';
     delivery.units.push({ ...structuredClone(delivery.units[0]!), id: 'other', path: 'packages/other', notesPath: '.release-notes/other.md' });
+    delivery.units[1]!.assets[0]!.name='other-${version}.exe';
     workflow.jobs.build.strategy.matrix.include.push({ unit: 'other', target: 'windows-x64', assets: ['app'] });
     f.context.cycle.units[0]!.tag = 'app-v1.0.0';
     f.context.cycle.units.push({ ...structuredClone(f.context.cycle.units[0]!), id: 'other', tag: 'other-v1.0.0' });
@@ -25,7 +27,8 @@ export function productPipelineFixture(attempts = 1, twoUnits = false) {
     source['.github/workflows/steward-release-publish.yml'] = YAML.stringify(workflow);
     source['release-please-config.json'] = JSON.stringify({ 'include-component-in-tag': true, 'include-v-in-tag': true,
       packages: Object.fromEntries(delivery.units.map(unit => [unit.path, { 'release-type': 'simple', 'version-file': 'VERSION', component: unit.id }])) });
-    source['.release-please-manifest.json'] = '{".":"1.0.0","packages/other":"1.0.0"}'; source['packages/other/VERSION'] = '1.0.0\n';
+    source['.release-please-manifest.json'] = '{"packages/app":"1.0.0","packages/other":"1.0.0"}';
+    source['packages/app/VERSION'] = source['packages/other/VERSION'] = '1.0.0\n';
   }
   const bytes = Buffer.from(source['.github/delivery.json']!);
   f.context.cycle.deliveryConfigSha = createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
@@ -54,6 +57,7 @@ export function productPipelineFixture(attempts = 1, twoUnits = false) {
   const calls: string[] = [];
   const gh = async (args: readonly string[]) => {
     const path = args.at(-1)!; calls.push(path);
+    if (path === `repos/${f.context.repository}`) return JSON.stringify({id:f.context.repositoryId,full_name:f.context.repository,private:false,visibility:'public',default_branch:'main',archived:false,disabled:false});
     if (path === 'users/splrad-steward%5Bbot%5D') return JSON.stringify({ id: 42, type: 'Bot', login: 'splrad-steward[bot]' });
     if (path.endsWith('/heads/steward/release-state')) return JSON.stringify({ ref: 'refs/heads/steward/release-state', object: { type: 'commit', sha: D } });
     if (path.endsWith('/heads/' + f.request.ref)) return JSON.stringify({ ref: `refs/heads/${f.request.ref}`, object: { type: 'commit', sha: S } });

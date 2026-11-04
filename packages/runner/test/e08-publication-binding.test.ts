@@ -3,7 +3,6 @@ import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 const {inspectPublications,invokePublication}=await import(pathToFileURL(resolve('e08-python/native/index.js')).href) as typeof import('../src/release-publication.js');
 import type {PublicationFile} from '../src/release-publication.js';
-import {deriveFailureBudget} from '../../core/src/release-observation.js';
 import {evidenceFixture,S,C,D,START,NOW,digest} from './native-evidence-fixture.js';
 import {inspectNativeCycle,type EvidenceStore,type ArchiveFile,type EvidenceTransport} from '../src/native-release-evidence.js';
 function fixture() {
@@ -36,8 +35,8 @@ function fixture() {
     return {status:'APPLIED',head:D,files:[...files],records:[]};}};
   const current={runId:900,runAttempt:1,controllerSha:C,defaultBranch:'main'};
   const terminal=()=>{run.status='completed';run.conclusion='failure';job.status='completed';job.conclusion='failure';job.completed_at=NOW;job.steps[0].completed_at=NOW;job.steps[0].conclusion='failure';};
-  const budget=async()=>{const p=await inspectPublications(f.context,history,productIo,centralIo,NOW);return deriveFailureBudget(p.native,p.archived,{repositoryId:1,cycleId:f.context.cycle.id,sourceSha:S,expectedRunIds:[900],currentWave:null});};
-  return {...f,productIo,centralIo,files,history,calls,store,current,run,job,terminal,budget,setExists:()=>{exists=true;},setReadFailure:()=>{readFailure=true;}};
+  const observed=()=>inspectPublications(f.context,history,productIo,centralIo,NOW);
+  return {...f,productIo,centralIo,files,history,calls,store,current,run,job,terminal,observed,setExists:()=>{exists=true;},setReadFailure:()=>{readFailure=true;}};
 }
 it('adopts a private start before the first write, ignores a lost response when the actual immutable bytes exist',async()=>{
   const f=fixture();let writes=0;
@@ -45,7 +44,7 @@ it('adopts a private start before the first write, ignores a lost response when 
     expect(f.calls.at(-1)).not.toBe('BUSINESS_WRITE');expect(f.files[0]!.path).toContain('evidence/publication/');
     f.calls.push('BUSINESS_WRITE');writes++;f.setExists();throw Error('lost response');},NOW,()=>NOW);
   expect(result.publishInvoked).toBe(true);expect(writes).toBe(1);expect(f.calls.indexOf('ARCHIVE_READBACK')).toBeLessThan(f.calls.indexOf('BUSINESS_WRITE'));
-  f.terminal();expect(await f.budget()).toMatchObject({remaining:3,failedWaveKeys:[],unknownEvidence:[]});
+  f.terminal();expect((await f.observed()).native.complete).toBe(true);
   expect(f.files[0]!.content).toContain('"businessStartedProven":true');
 });
 it.each(['UNKNOWN','UNCHANGED','missing-readback'])('does not write business after %s start adoption',async mode=>{
@@ -53,35 +52,28 @@ it.each(['UNKNOWN','UNCHANGED','missing-readback'])('does not write business aft
   const result=await invokePublication(f.context,f.current,[],f.store,f.productIo,f.centralIo,async()=>{writes++;},NOW,()=>NOW);
   expect(result.publishInvoked).toBe(false);expect(writes).toBe(0);
 });
-it('an interrupted native terminal entry counts exactly once and an in-flight entry waits',async()=>{
+it('an interrupted native entry does not repeat its publication write',async()=>{
   const f=fixture();await invokePublication(f.context,f.current,[],f.store,f.productIo,f.centralIo,async()=>{throw Error('interrupted');},NOW,()=>NOW);
-  const flying=await f.budget();expect(flying.inFlightWaveKeys).toHaveLength(1);expect(flying.failedWaveKeys).toHaveLength(0);
-  f.terminal();expect(await f.budget()).toMatchObject({remaining:2});
+  expect((await f.observed()).native.complete).toBe(true);
+  f.terminal();expect((await f.observed()).native.complete).toBe(true);
   const repeated=await invokePublication(f.context,f.current,f.history,f.store,f.productIo,f.centralIo,async()=>{throw Error('must not repeat');},NOW,()=>NOW);
   expect(repeated.reason).toBe('PUBLICATION_ALREADY_INVOKED');
 });
 it('unknown object reads remain UNKNOWN and wrong native sources cannot publish',async()=>{
   const f=fixture();await invokePublication(f.context,f.current,[],f.store,f.productIo,f.centralIo,async()=>{},NOW,()=>NOW);f.terminal();f.setReadFailure();
-  expect((await f.budget()).remaining).toBeNull();
+  expect((await f.observed()).files.some(file=>JSON.parse(file.content).objects.some((object:any)=>object.status==='UNKNOWN'))).toBe(true);
   const g=fixture();g.run.head_sha=S;await expect(invokePublication(g.context,g.current,[],g.store,g.productIo,g.centralIo,async()=>{},NOW,()=>NOW)).rejects.toThrow('current central source');
 });
 it('readback of a changing native step blocks the business write',async()=>{
   const f=fixture(),original=f.store.archive;f.store.archive=async files=>{const result=await original(files);f.terminal();return result;};let calls=0;
   expect((await invokePublication(f.context,f.current,[],f.store,f.productIo,f.centralIo,async()=>{calls++;},NOW,()=>NOW)).reason).toBe('PUBLICATION_SOURCE_CHANGED');expect(calls).toBe(0);
 });
-it('combines product failures with the actual central publication failure in one cycle budget',async()=>{
-  const f=fixture();await invokePublication(f.context,f.current,[],f.store,f.productIo,f.centralIo,async()=>{},NOW,()=>NOW);f.terminal();
-  const publication=await inspectPublications(f.context,f.history,f.productIo,f.centralIo,NOW),product=evidenceFixture(2);
-  const result=await inspectNativeCycle(product.context,[],product.io,NOW,{complete:true,observations:[],publication});
-  expect(result.budget.remaining).toBe(0);expect(result.budget.failedWaveKeys).toHaveLength(3);
-});
 it.each([410,403])('central HTTP %i uses only complete original coverage and never treats access loss as expiry',async status=>{
   const f=fixture();await invokePublication(f.context,f.current,[],f.store,f.productIo,f.centralIo,async()=>{},NOW,()=>NOW);f.terminal();
   const terminal=await inspectPublications(f.context,f.history,f.productIo,f.centralIo,'2026-10-26T00:03:00.000Z');await f.store.archive(terminal.files);
   const original=f.centralIo.request;f.centralIo.request=async(method,path,limit,body)=>path.endsWith('/actions/runs/900')?f.response({},status):original(method,path,limit,body);
   const recovered=await inspectPublications(f.context,f.history,f.productIo,f.centralIo,'2026-11-26T00:00:00.000Z');
-  const budget=await deriveFailureBudget(recovered.native,recovered.archived,{repositoryId:1,cycleId:f.context.cycle.id,sourceSha:S,expectedRunIds:[900],currentWave:null});
-  expect(budget.remaining).toBe(status===410?2:null);expect(recovered.native.runs[0]?.availability).toBe(status===410?'expired':undefined);
+  expect(recovered.native.complete).toBe(status===410);expect(recovered.native.runs[0]?.availability).toBe(status===410?'expired':undefined);
 });
 
 it('rejects production controller identity in the E08 compiled publication boundary',async()=>{

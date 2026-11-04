@@ -19,6 +19,23 @@ url = "https://github.com/anchore/syft/releases/download/v1.55.0/syft_1.55.0_win
 url_api = "https://api.github.com/repos/anchore/syft/releases/assets/657153857"
 provenance = "cosign"
 
+[[tools."aqua:astral-sh/ruff"]]
+version = "0.17.3"
+backend = "aqua:astral-sh/ruff"
+specifiers = ["latest"]
+
+[tools."aqua:astral-sh/ruff"."platforms.linux-x64"]
+checksum = "sha256:2b0890f5a55900af741f133918c2656919bbf18c2ab7741b4ca8403a90e647a9"
+url = "https://github.com/astral-sh/ruff/releases/download/0.17.3/ruff-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/ruff/releases/assets/679956535"
+provenance = "github-attestations"
+
+[tools."aqua:astral-sh/ruff"."platforms.windows-x64"]
+checksum = "sha256:a84d9ac74af8ef5bac84a1888a1634df18e6e985e2f930d35c052beacd00e813"
+url = "https://github.com/astral-sh/ruff/releases/download/0.17.3/ruff-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/astral-sh/ruff/releases/assets/679956524"
+provenance = "github-attestations"
+
 [[tools."aqua:astral-sh/uv"]]
 version = "0.13.5"
 backend = "aqua:astral-sh/uv"
@@ -154,23 +171,17 @@ aube = { path = ".mise/locks/npm/12.2.1", digest = "sha256:444df8e4844b0bbac7375
 backend = "npm:npm"
 specifiers = ["latest"]
 
-[[tools."pypi:pyflakes"]]
-version = "4.0.3"
-backend = "pypi:pyflakes"
-specifiers = ["latest"]
-uv = { path = ".mise/locks/pypi-pyflakes/4.0.3", digest = "sha256:ce348fdba0b220ae79ca909c0c9f3b083bdbd66669bbfb4fe0728ae5247ee35d" }
-
 [[tools.python]]
-version = "3.15.2"
+version = "3.15.1"
 backend = "core:python"
 specifiers = ["latest"]
 
 [tools.python."platforms.linux-x64"]
-checksum = "sha256:7b03163a980c607ba8194709d4a4086735a7a9c488cc475b098157306927b36b"
-url = "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.15.2+20261026-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+checksum = "sha256:01d901e09ca673c99a6c9bd9ec2cfbd58dbe8813d07514c36cb73cfd20b18bd8"
+url = "https://github.com/astral-sh/python-build-standalone/releases/download/20261021/cpython-3.15.1+20261021-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
 provenance = "github-attestations"
 
 [tools.python."platforms.windows-x64"]
-checksum = "sha256:02e532b60e720aa3d77e757c349ae9cc945441c05851fa646336fc9ff0403041"
-url = "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.15.2+20261026-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+checksum = "sha256:e7153a9f05921a72f7da1551d3bd374a88c4ffc0bbbea08776ddcb99b787d0f8"
+url = "https://github.com/astral-sh/python-build-standalone/releases/download/20261021/cpython-3.15.1+20261021-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
 provenance = "github-attestations"

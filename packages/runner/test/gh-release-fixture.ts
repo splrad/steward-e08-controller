@@ -25,7 +25,7 @@ export async function ghReleaseFixture(sourceShaOverride?:string) {
     html_url: 'https://github.com/fixture/product/releases/tag/v1.2.3', upload_url: 'https://uploads.github.com/repos/fixture/product/releases/20/assets{?name,label}' };
   const releases = new Map<number, typeof release>([[20, release]]);
   const state = { source: sourceSha, tag: true, annotated: false, loseUpload: false, losePublish: false, loseBody: false, loseDraft: false, loseTag: false,
-    failUpload: false, incomplete: false, corruptDownload: false, disabled: false, disableAfterUpload: false, runStatus: 'completed', runConclusion: 'success',
+    failUpload: false, incomplete: false, corruptDownload: false, disabled: false, private: false, disableAfterUpload: false, runStatus: 'completed', runConclusion: 'success',
     invocation: 'https://github.com/fixture/product/actions/runs/10/attempts/2', certificateRepository: '1', buildTrigger: 'workflow_dispatch' };
   let nextAsset = 100;
   const put = (name: string, bytes: Buffer, extra = {}) => remote.set(name, { bytes, id: nextAsset++, state: 'uploaded', label: '', uploader: { id: 42 }, ...extra });
@@ -36,7 +36,7 @@ export async function ghReleaseFixture(sourceShaOverride?:string) {
       const endpoint = args.find(arg => arg.startsWith('repos/') || arg.startsWith('https://uploads.'))!;
       const body = args.includes('--input') && !endpoint.startsWith('https:') ? JSON.parse(await readFile(args[args.indexOf('--input') + 1]!, 'utf8')) : null;
       if (method === 'GET') {
-        if (endpoint === 'repos/fixture/product') return JSON.stringify({ id: 1, full_name: 'fixture/product', archived: false, disabled: state.disabled, private: false });
+        if (endpoint === 'repos/fixture/product') return JSON.stringify({ id: 1, full_name: 'fixture/product', archived: false, disabled: state.disabled, private: state.private });
         if (endpoint.endsWith('/actions/runs/10')) return JSON.stringify({ id: 10, run_attempt: 2, repository: { id: 1 }, head_repository: { id: 1 }, head_sha: sourceSha,
           head_branch: manifest.buildRef.slice(11), path: '.github/workflows/steward-release-publish.yml', event: 'workflow_dispatch', actor: { id: 42 }, status: state.runStatus, conclusion: state.runConclusion });
         if (endpoint.endsWith('/git/ref/tags/v1.2.3')) {

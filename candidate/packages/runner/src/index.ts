@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-export { parseDeliveryConfig, deliveryAssetNames } from '../../core/src/delivery-config.js';
+export { parseDeliveryConfig, deliveryAssetNames, assertDeliveryPath } from '../../core/src/delivery-config.js';
+export { assertProductDelivery } from './release-pipeline.js';
 export { parsePipelineRecord, pipelineSource } from './release-pipeline-record.js';
 export { pipelineIdentity, pipelineNotes, pipelineInspect, pipelineRecoverCycleFinal, mergedBuildCycle, findFrozenFinal, pipelineDownloadPhase, pipelineFrozenManifest, pipelinePublish, pipelineVerifyPublished, pipelinePreparePublication, readCycleDelivery, prepareNormalizedDelivery } from './release-pipeline.js';
 export { inspectProductArtifacts, sealProductArtifacts, validateProductManifest } from './release-artifacts.js';
 export { renderFrozenReleaseNotes } from '../../core/src/release-template.js';
 export { decodeCompletionArchive } from '../../core/src/release-history.js';
 export { advanceReleaseCandidate } from './release-candidate.js';
+export { candidateId } from '../../core/src/release-candidate.js';
 export { generateCandidate, pushPreparedCandidate } from './release-candidate-update.js';
 export { collectContentInput, planContentBatches, resumeContentBatches, assembleUnitNotes } from './release-content.js';
 export { copilotReleaseClient } from './copilot-release-client.js';
@@ -27,7 +29,7 @@ export { nativeReleaseInspector, nativePythonSourceVersion } from './release-nat
 export { generateReleaseSbom } from './release-sbom.js';
 export { parseLegacyRepositoryCatalog } from '../../core/src/legacy-repository-policy.js';
 export { selectReleaseProducers, assertReleaseJobResults } from './release-run.js';
-export { dispatchNativeRun, prepareBuildDispatch, prepareContinuation, dispatchObservationFile, verifyExecutionSource, verifyDispatchWorkflow } from './release-run.js';
+export { dispatchNativeRun, prepareBuildDispatch, dispatchObservationFile, verifyExecutionSource, verifyDispatchWorkflow } from './release-run.js';
 export { retainedChannelObservations, observeNativeChannels, readChannelSourceRejections, selectChannelDispatch, prepareChannelDispatch, channelTargetsDigest, verifyChannelProbe, verifyChannelResult, channelEvidenceFile, verifyContinuationReleases } from './release-run.js';
 export { nativeRunFact, jobFact, NativeEvidenceReader } from './native-release-evidence.js';
 export { nativeJobOrigins, originalJobExecutions } from '../../core/src/native-job-origins.js';

@@ -7,6 +7,7 @@ interface ProtectedRecord {path:string;commit:string;value:any;content?:string}
 export interface HistorySnapshot {
   repositoryId:number;repository:string;defaultBranch:string;appBotId:number;head:string;defaultHead:string;releaseAdoption:{sourceSha:string;prNumber:number}|null;
   reachable:string[];cycles:{value:CycleRecord}[];domainRecords:ProtectedRecord[];
+  cycleHistory?:{commit:string;value:CycleRecord}[];
   repositoryHistory:{commit:string;committedAt:string;value:RepositoryRecord}[];
 }
 export function completionFile(value:CompletionArchive) {
@@ -16,10 +17,14 @@ export function completionFile(value:CompletionArchive) {
 /** Full native PR enumeration is cross-checked with actual Git reachability and retained candidate identities. */
 export async function inspectCycleHistory(snapshot:HistorySnapshot,io:EvidenceTransport,now:string,
   fresh?: (cycle:CycleRecord)=>Promise<CycleCompletionFact|undefined>,originalState?: (commit:string)=>Promise<{cycles:CycleRecord[];completions:CompletionArchive[]}>,
-  verifySource?: (pr:any,cycle:CycleRecord|undefined)=>Promise<boolean>) {
+  verifySource?: (pr:any,cycle:CycleRecord|undefined)=>Promise<boolean>,handoff?:CycleRecord) {
   const reader=new NativeEvidenceReader(io,snapshot.repository),discovered:CycleHistoryFact[]=[],decisions:RepairDecisionFact[]=[],completions:CycleCompletionFact[]=[];
   const reasons:string[]=[],nativePulls:any[]=[],nativeDecisions:any[]=[];
   let complete=!!snapshot.releaseAdoption,repairActorId=0;
+  // This proposal comes from the fixed adapter after it verifies the merged PR,
+  // reviewed tree and archived generation. It is not an admitted old obligation.
+  if(handoff&&snapshot.cycles.some(record=>record.value.id===handoff.id))throw new Error('RELEASE_HISTORY: handoff already admitted');
+  const edgeCycles=snapshot.cycles.map(({value})=>structuredClone(value));
   const repository=await reader.json('');
   if(repository.id!==snapshot.repositoryId||repository.full_name!==snapshot.repository||repository.default_branch!==snapshot.defaultBranch
     ||repository.archived!==false||repository.disabled!==false)throw new Error('RELEASE_HISTORY: native repository identity');
@@ -41,34 +46,11 @@ export async function inspectCycleHistory(snapshot:HistorySnapshot,io:EvidenceTr
         ||!branches.has(pr.head?.ref)||pr.user?.id!==snapshot.appBotId) {complete=false;reasons.push('CANDIDATE_IDENTITY_UNPROVEN');continue;}
       if(!snapshot.reachable.includes(pr.merge_commit_sha))continue;
       discovered.push({id:`pr-${pr.number}-${pr.merge_commit_sha}`,prNumber:pr.number,sourceSha:pr.merge_commit_sha,mergedAt:pr.merged_at});
-      if(!verifySource||!await verifySource(pr,snapshot.cycles.find(r=>r.value.prNumber===pr.number&&r.value.sourceSha===pr.merge_commit_sha)?.value)) {
+      const cycle=snapshot.cycles.find(r=>r.value.prNumber===pr.number&&r.value.sourceSha===pr.merge_commit_sha)?.value
+        ??(handoff&&handoff.prNumber===pr.number&&handoff.sourceSha===pr.merge_commit_sha?handoff:undefined);
+      if(!verifySource||!await verifySource(pr,cycle)) {
         complete=false;reasons.push('NATIVE_SOURCE_VERSION_UNPROVEN');
       }
-    }
-    if(snapshot.cycles.some(record=>record.value.repairOf!==null)) {
-      const user=(await reader.json('collaborators/axiomoth/permission')).user;
-      if(user?.login!=='axiomoth'||!Number.isSafeInteger(user.id)||user.id<1)throw new Error('repair actor unavailable');repairActorId=user.id;
-    }
-    for(const {value:cycle} of snapshot.cycles)if(cycle.approvedRepairDecision) {
-      const decision=cycle.approvedRepairDecision,event=await reader.json(`issues/events/${decision.eventId}`);nativeDecisions.push(event);
-      const label=event.label?.name;
-      if(event.id!==decision.eventId||event.event!=='labeled'||event.actor?.id!==repairActorId||Date.parse(event.created_at)!==Date.parse(decision.createdAt as string)
-        ||!/^release:(?:abandoned|supersede-required)(?::[a-z][a-z0-9-]*)?$/.test(label??''))continue;
-      const prior=snapshot.repositoryHistory.filter(record=>Date.parse(record.committedAt)<=Date.parse(event.created_at))
-        .sort((a,b)=>Date.parse(b.committedAt)-Date.parse(a.committedAt));
-      if(!prior[0]||prior[1]?.committedAt===prior[0].committedAt)continue;
-      if(!originalState)continue;
-      const original=await originalState(prior[0].commit);
-      const activeIds=original.cycles.filter(cycle=>!original.completions.some(value=>completionMatchesCycle(snapshot.repositoryId,cycle,value.source)
-        &&Date.parse(value.observation.observedAt)<=Date.parse(event.created_at)&&evaluateCompletion(value.source,value.observation,value.observation.observedAt).result==='PASS')).map(cycle=>cycle.id);
-      if(activeIds.length!==1||activeIds[0]!==decision.cycleId)continue;
-      const active=activeIds[0]!;
-      const old=snapshot.cycles.find(record=>record.value.id===active)?.value;
-      const ids=label.split(':').length===3?[label.split(':')[2]]:old?.units.map(unit=>unit.id);
-      if(!old||!ids||JSON.stringify([...ids].sort())!==JSON.stringify([...(decision.unitIds as string[])].sort()))continue;
-      decisions.push({...decision,eventId:event.id,actorId:event.actor.id,createdAt:decision.createdAt as string,unitIds:ids,
-        releaseIds:decision.releaseIds as number[],tags:decision.tags as string[],evidencePath:decision.evidencePath as string,
-        originalStateCommit:prior[0].commit,originalActiveCycleIds:activeIds} as RepairDecisionFact);
     }
   }catch{complete=false;reasons.push('NATIVE_HISTORY_UNAVAILABLE');}
   for(const record of snapshot.domainRecords.filter(record=>record.path.startsWith('evidence/completion/'))) {
@@ -80,7 +62,11 @@ export async function inspectCycleHistory(snapshot:HistorySnapshot,io:EvidenceTr
       completions.push({cycleId:value.cycleId,source:value.source,observation:value.observation,kind:'historical',provenanceComplete});
     }catch{complete=false;reasons.push('COMPLETION_ARCHIVE_INVALID');}
   }
-  const latest=[...discovered].sort((a,b)=>a.mergedAt.localeCompare(b.mergedAt)).at(-1)?.id;
+  if(handoff&&discovered.filter(fact=>fact.id===handoff.id&&fact.prNumber===handoff.prNumber&&fact.sourceSha===handoff.sourceSha).length!==1) {
+    complete=false;reasons.push('HANDOFF_SOURCE_UNPROVEN');
+  }
+  const previous=discovered.filter(fact=>fact.id!==handoff?.id);
+  const latest=[...previous].sort((a,b)=>a.mergedAt.localeCompare(b.mergedAt)).at(-1)?.id;
   for(const {value:cycle} of snapshot.cycles)if(fresh&&(cycle.id===latest||!completions.some(fact=>fact.cycleId===cycle.id&&fact.provenanceComplete
     &&evaluateCompletion(fact.source,fact.observation,fact.observation.observedAt).result==='PASS'))) {
     try{const value=await fresh(cycle);if(value&&value.kind==='live')completions.push(value);}catch{reasons.push('FRESH_COMPLETION_UNAVAILABLE');}
@@ -93,7 +79,8 @@ export async function inspectCycleHistory(snapshot:HistorySnapshot,io:EvidenceTr
     if(JSON.stringify([current.base?.repo?.id,current.base?.ref,current.head?.repo?.id,current.head?.ref,current.merged,current.merge_commit_sha])
       !==JSON.stringify([pr.base?.repo?.id,pr.base?.ref,pr.head?.repo?.id,pr.head?.ref,pr.merged,pr.merge_commit_sha]))complete=false;
   }
-  const result=reconcileCycleHistory({repositoryId:snapshot.repositoryId,inventoryComplete:complete,cycles:snapshot.cycles.map(record=>record.value),discovered,
+  const result=reconcileCycleHistory({repositoryId:snapshot.repositoryId,inventoryComplete:complete,cycles:edgeCycles,discovered:previous,
     completions,decisions,repairActorId,now});
-  return {...result,inventoryComplete:complete,defaultHead:before.defaultHead,stateHead:before.stateHead,discovered,nativePulls,nativeDecisions,readReasons:reasons};
+  return {...result,inventoryComplete:complete,defaultHead:before.defaultHead,stateHead:before.stateHead,discovered,nativePulls,nativeDecisions,
+    verifiedDecisions:decisions,edgeCycles,readReasons:reasons,pendingHandoff:handoff?.id??null};
 }

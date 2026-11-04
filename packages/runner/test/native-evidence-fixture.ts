@@ -31,7 +31,7 @@ export function evidenceFixture(attempts=1) {
       invocationKey:digest(JSON.stringify([1,cycle.id,10,100,attempt,'build',attempt*1000,2,'app',null,request.inputDigest])),startedAt:start,businessStartedProven:true,nativeEvidencePath:'evidence/native.json',outcome:'BUSINESS_FAILED' as const,completedAt:end,objectEvidencePaths:[],observedAt:end};
     results.set(attempt,{schemaVersion:1,sourceSha:S,executionSha:S,stepNumber:2,reasonCode:'RESULT',execution,objects:[]});
   }
-  const io:EvidenceTransport={async request(method,path) {
+  const io:EvidenceTransport={anonymous:()=>io,async request(method,path) {
     calls.push(`${method} ${path}`);
     const override=overrides.get(`${method} ${path}`);if(override)return typeof override==='function'?override():override;
     if(path==='/repos/example/product/')return response({message:'Not Found'},404);
@@ -40,7 +40,7 @@ export function evidenceFixture(attempts=1) {
       if(accepted) {latest++;runs.set(latest,{...runs.get(latest-1),run_attempt:latest,status:'queued',conclusion:null});}
       if(throwPost)throw new Error('secret-shaped transport failure');return response('',201);
     }
-    if(suffix==='')return response({id:1,full_name:context.repository,default_branch:'main',archived:false,disabled:false});
+    if(suffix==='')return response({id:1,full_name:context.repository,private:false,default_branch:'main',archived:false,disabled:false});
     if(suffix==='actions/runs/100')return response(runs.get(latest));
     if(suffix==='actions/workflows/10')return response({id:10,path:runs.get(1).path});
     if(suffix.startsWith('contents/'))return response({type:'file',encoding:'base64',content:workflowBytes.toString('base64'),size:workflowBytes.length,sha:blobSha});

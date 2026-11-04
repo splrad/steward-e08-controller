@@ -8,7 +8,7 @@ import { completeMergedPull } from '../../github/src/merged-pull.js';
 import { collectAllPages, nextLink } from '../../github/src/pagination.js';
 import { buildLimits, decodeBuildJson } from '../../core/src/build-manifest.js';
 import { decodeNativeArchive, decodeNativeReadObservation, decodeNativeRetryLimit, decodeNativeSourceRejection, decodeNativeChannel, parseNativeResult, type NativeChannelEvidence, type NativeSourceRejection, type NativeRetryLimit, type NativeArchive, type NativeRun, type NativeJob, type NativeResult, type NativeReadObservation } from '../../core/src/native-evidence.js';
-import { deriveFailureBudget, nativeWaveKey, parseReleaseRecord, type CycleRecord, type NativeAttemptEvidence, type NativeAttemptSet, type ArchivedAttempt } from '../../core/src/release-observation.js';
+import { nativeWaveKey, parseReleaseRecord, type CycleRecord, type NativeAttemptEvidence, type NativeAttemptSet, type ArchivedAttempt } from '../../core/src/release-observation.js';
 import { extractArtifactFile } from './artifact-file.js';
 import { nativeJobOrigins, withinNativeJobWindow, type NativeJobAttempt } from '../../core/src/native-job-origins.js';
 import { nativeRerunLimitAnnotation } from '../../core/src/native-limit-annotation.js';
@@ -28,8 +28,9 @@ const utc = (value: unknown): string => {
 };
 export interface EvidenceResponse { status: number; headers: Headers; bytes: Uint8Array }
 export interface EvidenceTransport {
+  /** Same bounded transport with no API credential, used only for public formal objects. */
+  anonymous?():EvidenceTransport;
   request(method: 'GET' | 'POST', path: string, limit?: number, body?: object): Promise<EvidenceResponse>;
-  readRunPage?(repository:string,runId:number):Promise<EvidenceResponse>;
   downloadDigest?(path: string, limit: number): Promise<{ status: number; digest: string; size: number; retryAfter: string | null }>;
 }
 export interface EvidenceContext { repository: string; repositoryId: number; appBotId: number; cycle: CycleRecord }
@@ -77,17 +78,7 @@ export function nativeEvidenceTransport(token: string | undefined, transport: ty
     }
     return response;
   };
-  return { async readRunPage(repository,runId) {
-    check(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)&&!repository.split('/').some(p=>p==='.'||p==='..')&&positive(runId),'Run page identity');
-    const response=await transport(`https://github.com/${repository}/actions/runs/${runId}`,{headers:{accept:'text/html'},redirect:'error',signal:AbortSignal.timeout(60_000)});
-    check(response.status!==200||/^text\/html(?:;|$)/i.test(response.headers.get('content-type')??''),'Run page content type');
-    const chunks:Uint8Array[]=[];let size=0;
-    if(response.body){const reader=response.body.getReader();try{
-      check(Number(response.headers.get('content-length')??0)<=384*1024,'Run page bound');
-      for(;;){const part=await reader.read();if(part.done)break;size+=part.value.length;check(size<=384*1024,'Run page bound');chunks.push(part.value);}
-    }finally{await reader.cancel();reader.releaseLock();}}
-    return {status:response.status,headers:response.headers,bytes:Buffer.concat(chunks)};
-  }, async request(method, path, limit = 8 * 1024 * 1024, body) {
+  return { anonymous:()=>nativeEvidenceTransport(undefined,transport), async request(method, path, limit = 8 * 1024 * 1024, body) {
     const response=await open(method,path,body);
     const chunks: Uint8Array[] = []; let size = 0;
     if (response.body) {
@@ -143,7 +134,7 @@ export class NativeEvidenceReader {
     const bytes=(await this.response(path,buildLimits.maxTotalBytes+16*1024*1024)).bytes;
     return {digest:hash(bytes),size:bytes.length};
   }
-  async pages(path: string, field: string): Promise<any[]> {
+  async pages(path: string, field: string, identity: 'id' | 'name' = 'id'): Promise<any[]> {
     let total: number | null = null;
     const first = this.path(`${path}${path.includes('?') ? '&' : '?'}per_page=100`), endpoint = new URL(first, 'https://api.github.com');
     const values = await collectAllPages<any>(first, async next => {
@@ -160,11 +151,19 @@ export class NativeEvidenceReader {
       const link = nextLink(response.headers);
       return { items: field ? body[field] : body, ...(link ? { next: link } : {}) };
     });
-    check((!field || values.length === total) && new Set(values.map(value => value.id)).size === values.length && values.every(value => positive(value.id)), 'incomplete pagination');
+    check((!field || values.length === total) && new Set(values.map(value => value[identity])).size === values.length
+      && values.every(value => identity === 'id' ? positive(value.id) : typeof value.name === 'string' && value.name.length > 0), 'incomplete pagination');
     return [...values];
   }
 }
 
+export async function formalReleaseReader(context:EvidenceContext,io:EvidenceTransport) {
+  const repository=await new NativeEvidenceReader(io,context.repository).json('');
+  check(repository.id===context.repositoryId&&repository.full_name===context.repository&&typeof repository.private==='boolean'
+    &&repository.archived===false&&repository.disabled===false,'formal repository visibility');
+  const selected=repository.private?io:io.anonymous?.();check(selected,'anonymous formal reader required');
+  return new NativeEvidenceReader(selected,context.repository);
+}
 export function nativeRunFact(raw: any): NativeRun {
   return { id: raw.id, repositoryId: raw.repository?.id, headRepositoryId: raw.head_repository?.id, workflowId: raw.workflow_id,
     path: raw.path, event: raw.event, headSha: raw.head_sha, headBranch: raw.head_branch, actorId: raw.actor?.id,
@@ -178,7 +177,34 @@ export function jobFact(raw: any): NativeJob {
     steps: raw.steps.map((step: any) => ({ number: step.number, name: step.name, startedAt: step.started_at === null ? null : utc(step.started_at),
       completedAt: step.completed_at === null ? null : utc(step.completed_at), conclusion: step.conclusion })) };
 }
+const compareIdentityText = (a:string,b:string) => a < b ? -1 : a > b ? 1 : 0;
+function channelIdentityTargets(request:CycleRecord['dispatches'][number]):[string,string,string,number,string][] {
+  const targets=JSON.parse(request.inputs.targets_json!);
+  check(Array.isArray(targets)&&targets.length>0,'channel identity targets');
+  for(const target of targets)check(target&&Object.keys(target).sort().join(',')==='channelId,manifestDigest,releaseId,unitId,version'
+    &&typeof target.unitId==='string'&&typeof target.channelId==='string'&&typeof target.version==='string'
+    &&positive(target.releaseId)&&typeof target.manifestDigest==='string'&&/^[a-f0-9]{64}$/.test(target.manifestDigest),'channel identity target');
+  check(new Set(targets.map(target=>JSON.stringify([target.unitId,target.channelId]))).size===targets.length,'duplicate channel identity target');
+  return targets.sort((a,b)=>compareIdentityText(a.unitId,b.unitId)||compareIdentityText(a.channelId,b.channelId))
+    .map(target=>[target.unitId,target.channelId,target.version,target.releaseId,target.manifestDigest]);
+}
 export function nativeRequestIdentity(repositoryId: number, cycle: CycleRecord, request: CycleRecord['dispatches'][number]) {
+  const unitVersions=[...cycle.units].sort((a,b)=>compareIdentityText(a.id,b.id)).map(unit=>[unit.id,unit.version]);
+  const mode=request.purpose==='build'?'build':request.inputs.mode!;
+  const targetSet=request.purpose==='build'?unitVersions:channelIdentityTargets(request);
+  if(request.purpose==='build')check(request.executionSha===cycle.sourceSha,'build identity source');
+  else for(const [unitId,channelId,version,releaseId,manifestDigest] of targetSet) {
+    const unit=cycle.units.find(unit=>unit.id===unitId);
+    check(unit&&unit.version===version&&unit.releaseId===releaseId&&unit.manifestDigest===manifestDigest
+      &&cycle.requiredChannels.some(channel=>channel.unitId===unitId&&channel.channelId===channelId),'channel identity frozen target');
+  }
+  const targetKey=JSON.stringify([2,request.workflowId,request.ref,request.executionSha,cycle.sourceSha,request.purpose,mode,targetSet]);
+  const inputDigest=hash(JSON.stringify([4,cycle.id,cycle.sourceSha,request.executionSha,cycle.controllerSha,cycle.deliveryConfigSha,unitVersions,targetSet,mode]));
+  const operationKey=hash(JSON.stringify([2,repositoryId,cycle.id,request.purpose,targetKey,inputDigest]));
+  return {targetKey,inputDigest,operationKey,requestKey:hash(JSON.stringify([operationKey,request.continuationOfRunId]))};
+}
+// Read-only verification of archived format 3 keys. New requests always use format 4.
+function legacyRequestIdentity(repositoryId: number, cycle: CycleRecord, request: CycleRecord['dispatches'][number]) {
   const targets = request.purpose === 'build' ? [] : JSON.parse(request.inputs.targets_json!);
   const units = request.purpose === 'build' ? cycle.units : cycle.units.filter(unit => targets.some((target: any) => target.unitId === unit.id));
   const unitIds = units.map(unit => unit.id).sort(), channelIds = [...new Set<string>(targets.map((target: any) => target.channelId))].sort();
@@ -193,16 +219,25 @@ export function nativeRequestIdentity(repositoryId: number, cycle: CycleRecord, 
 export function sameChannelOperation(a:CycleRecord['dispatches'][number],b:CycleRecord['dispatches'][number]) {
   return a.purpose!=='build'&&a.purpose===b.purpose&&a.workflowId===b.workflowId&&a.sourceSha===b.sourceSha
     &&a.inputs.cycle_id===b.inputs.cycle_id&&a.inputs.controller_sha===b.inputs.controller_sha&&a.inputs.mode===b.inputs.mode
-    &&a.inputs.targets_json===b.inputs.targets_json;
+    &&JSON.stringify(channelIdentityTargets(a))===JSON.stringify(channelIdentityTargets(b));
 }
 export function validateEvidenceContext(input: EvidenceContext): EvidenceContext {
   check(Object.keys(input).sort().join(',') === 'appBotId,cycle,repository,repositoryId', 'context fields');
   check(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository) && !input.repository.split('/').some(part => ['.', '..'].includes(part))
     && positive(input.repositoryId) && positive(input.appBotId), 'context identity');
   const context = { ...input, cycle: parseReleaseRecord('cycle', input.cycle) };
+  const legacyTargets=new Map<string,string>();
   for (const request of context.cycle.dispatches) {
     const identity = nativeRequestIdentity(context.repositoryId, context.cycle, request);
-    check(Object.entries(identity).every(([key,value]) => request[key as keyof typeof identity] === value), 'request digest');
+    const matches=(value:typeof identity)=>Object.entries(value).every(([key,item])=>request[key as keyof typeof identity]===item);
+    if(!matches(identity)) {
+      check(matches(legacyRequestIdentity(context.repositoryId,context.cycle,request)),'request digest');
+      if(request.purpose!=='build') {
+        const targets=JSON.stringify(channelIdentityTargets(request)),prior=legacyTargets.get(request.operationKey);
+        check(prior===undefined||prior===targets,'legacy request target conflict');
+        legacyTargets.set(request.operationKey,targets);
+      }
+    }
     if(request.continuationOfRunId!==null)check(context.cycle.dispatches.some(prior=>prior.canonicalRunId===request.continuationOfRunId && sameChannelOperation(prior,request)),'continuation history');
   }
   const ids=context.cycle.dispatches.flatMap(request=>request.canonicalRunId===null?[]:[request.canonicalRunId]);
@@ -255,21 +290,6 @@ function verifyPlatformLimit(repository:string,run:NativeRun,platform:NonNullabl
   check(run.status==='completed'&&run.conclusion==='startup_failure'&&page.status===200
     &&page.sourceUrl===`https://github.com/${repository}/actions/runs/${run.id}`&&hash(page.body)===page.digest
     &&nativeRerunLimitAnnotation(page.body,repository,run.id),'platform limit annotation');
-}
-async function readPlatformLimit(reader:NativeEvidenceReader,run:NativeRun):Promise<NonNullable<NativeRetryLimit['platform']>> {
-  check(reader.io.readRunPage,'platform limit evidence unavailable');
-  const raw=await reader.json(`actions/runs/${run.id}`);check(same(nativeRunFact(raw),run)&&positive(raw.check_suite_id),'platform limit Run changed');
-  const suitePath=`check-suites/${raw.check_suite_id}`,suiteUrl=`https://api.github.com/repos/${reader.repository}/${suitePath}`;
-  check(raw.check_suite_url===suiteUrl,'platform limit suite URL');
-  const facts=(suite:any)=>({id:suite.id,repositoryId:suite.repository?.id,appId:suite.app?.id,appSlug:suite.app?.slug,headSha:suite.head_sha,status:suite.status,conclusion:suite.conclusion,runsRerequestable:suite.runs_rerequestable});
-  const suite=facts(await reader.json(suitePath)),response=await reader.io.readRunPage(reader.repository,run.id);
-  check(response.status===200,'platform limit page unreadable');
-  const body=new TextDecoder('utf-8',{fatal:true}).decode(response.bytes),platform={checkSuiteId:raw.check_suite_id,suiteSourceUrl:suiteUrl,suite,
-    page:{sourceUrl:`https://github.com/${reader.repository}/actions/runs/${run.id}`,status:response.status,body,digest:hash(response.bytes)}};
-  verifyPlatformLimit(reader.repository,run,platform);
-  const after=await reader.json(`actions/runs/${run.id}`);
-  check(same(nativeRunFact(after),run)&&after.check_suite_id===raw.check_suite_id&&same(facts(await reader.json(suitePath)),suite),'platform limit changed');
-  return platform;
 }
 async function workflowSource(reader: NativeEvidenceReader, run: NativeRun) {
   const workflow = await reader.json(`actions/workflows/${run.workflowId}`);
@@ -410,7 +430,6 @@ export async function archiveAttempt(archive: NativeArchive, previous: NativeArc
       evidence.completedAt??=step.completedAt>=evidence.startedAt?step.completedAt:null;
       evidence.outcome=evidence.completedAt?'BUSINESS_FAILED':'UNKNOWN';
     } else if (evidence.outcome==='BUSINESS_FAILED' || evidence.outcome==='EFFECT_CONFIRMED' || evidence.businessStartedProven && evidence.outcome===null) evidence.outcome='UNKNOWN';
-    if (archive.run.triggeringActorId!==archive.run.actorId && (evidence.businessStartedProven || evidence.outcome!=='REJECTED_BEFORE_BUSINESS')) evidence.outcome='FACT_CONFLICT';
     evidence.observedAt=archive.observedAt; evidence.nativeEvidencePath=file.path;
     evidence.objectEvidencePaths=evidence.outcome==='BUSINESS_FAILED'||evidence.outcome==='EFFECT_CONFIRMED' ? [file.path] : [];
     const previous=invocations.get(evidence.invocationKey);
@@ -564,10 +583,41 @@ export async function inspectNativeCycle(input: EvidenceContext, history: Archiv
   if(readHistory.publication) {archived.push(...(readHistory.publication.archived??[]));native.runs.push(...readHistory.publication.native.runs);native.attempts.push(...readHistory.publication.native.attempts);
     missingNativeKeys.push(...readHistory.publication.missing);if(!readHistory.publication.native.complete)missingNativeKeys.push('central-publication:incomplete');
   } else if(context.cycle.publications.length)missingNativeKeys.push('central-publication:original-evidence-required');
-  native.complete=missingNativeKeys.length===0;
-  const budget=await deriveFailureBudget(native,archived,{repositoryId:context.repositoryId,cycleId:context.cycle.id,sourceSha:context.cycle.sourceSha,
-    expectedRunIds:[...new Set([...context.cycle.dispatches.flatMap(request=>request.canonicalRunId===null?[]:[request.canonicalRunId]),...(readHistory.publication?.native.runs.map(run=>run.runId)??[])])],currentWave:null});
-  const missing=[...new Set([...missingNativeKeys,...budget.unknownEvidence,...budget.conflictEvidence])].sort();
+  // Validate the latest native attempt, without deriving a cross-stage failure budget.
+  const latest = native.runs.flatMap(run => {
+    const observations = run.availability==='expired' ? archived.map(item=>item.attempt) : native.attempts;
+    return observations.filter(item=>item.runId===run.runId && item.runAttempt===run.latestAttempt)
+      .sort((a,b)=>b.observedAt.localeCompare(a.observedAt)).slice(0,1);
+  });
+  const unknown=new Set(missingNativeKeys), conflicts=new Set<string>(), inFlight=new Set<string>();
+  for(const item of latest) {
+    const key=await nativeWaveKey(item);
+    if(!item.jobsComplete)unknown.add(`${key}:jobs-incomplete`);
+    if(item.status!=='completed'){inFlight.add(key);continue;}
+    for(const job of item.jobs)for(const step of job.steps) {
+      if(step.name.startsWith('business-') && step.startedAt && step.conclusion!=='skipped'
+        && !item.invocations.some(inv=>inv.jobId===job.id && inv.stepNumber===step.number))unknown.add(`${key}:step:${job.id}:${step.number}:missing-result`);
+    }
+    for(const {evidence,jobId,stepNumber} of item.invocations) {
+      const step=item.jobs.find(job=>job.id===jobId)?.steps.find(step=>step.number===stepNumber);
+      if(!step || step.conclusion==='skipped' || !step.name.startsWith('business-')
+        || evidence.jobId!==jobId && !(item.entry==='publish' && evidence.jobId===null)
+        || await nativeWaveKey(evidence)!==key || evidence.inputDigest!==item.inputDigest
+        || Date.parse(evidence.observedAt)>Date.parse(item.observedAt)
+        || evidence.businessStartedProven && (!step.startedAt || !withinNativeJobWindow(evidence.startedAt,step.startedAt,step.completedAt))) {
+        conflicts.add(`${key}:invocation-source`);continue;
+      }
+      if(evidence.outcome==='FACT_CONFLICT')conflicts.add(evidence.invocationKey);
+      else if(evidence.outcome===null || evidence.outcome==='UNKNOWN'
+        || ['WAIT','REJECTED_BEFORE_BUSINESS'].includes(evidence.outcome) && evidence.businessStartedProven
+        || ['BUSINESS_FAILED','EFFECT_CONFIRMED'].includes(evidence.outcome)
+          && (evidence.outcome==='BUSINESS_FAILED' && !evidence.businessStartedProven || !evidence.completedAt || !evidence.objectEvidencePaths.length))
+        unknown.add(`${key}:${evidence.invocationKey}:missing-business-proof`);
+    }
+  }
+  const currentFacts={unknownEvidence:[...unknown].sort(),conflictEvidence:[...conflicts].sort(),inFlightWaveKeys:[...inFlight].sort()};
+  native.complete=unknown.size===0;
+  const missing=[...new Set([...unknown,...conflicts])].sort();
   let consecutive=0;
   const prior=readHistory.observations.map(value=>decodeNativeReadObservation(Buffer.from(JSON.stringify(value))))
     .filter(value=>value.repositoryId===context.repositoryId && value.cycleId===context.cycle.id && value.observedAt<utc(observedAt))
@@ -587,21 +637,20 @@ export async function inspectNativeCycle(input: EvidenceContext, history: Archiv
     disposition:unrecoverable?'UNRECOVERABLE':missing.length?'RETRY':'COMPLETE',nextCheckAt};
   if(unrecoverable)readObservation.errorCodes.push('EVIDENCE_UNRECOVERABLE');
   if(readObservation.disposition==='COMPLETE' && prior[0]?.disposition==='COMPLETE' && sameFacts(prior[0],readObservation))readObservation=prior[0];
-  return {context,archives,history,native,archived,budget,missingNativeKeys,errors,observedAt:utc(observedAt),readObservation,latestRuns};
+  return {context,archives,history,native,archived,currentFacts,missingNativeKeys,errors,observedAt:utc(observedAt),readObservation,latestRuns};
 }
 
 /** Fixed native rerun connection. Every invocation re-reads all history, archives, then reads the exact Run again. */
 export async function recoverNativeCycle(input: EvidenceContext, runId: number, store: EvidenceStore, history: ArchivedFile[] = [],
   io = nativeEvidenceTransport(process.env.GH_TOKEN), observedAt = new Date().toISOString(),readHistory:ReadHistory={complete:false,observations:[]}) {
-  const observation=await inspectNativeCycle(input,history,io,observedAt,readHistory), {context,budget}=observation;
+  const observation=await inspectNativeCycle(input,history,io,observedAt,readHistory), {context,currentFacts}=observation;
   const saved=await store.archive([...observation.archives.map(archiveFile),nativeReadFile(observation.readObservation)]);
   if(!['APPLIED','UNCHANGED'].includes(saved.status) || !saved.head || observation.archives.filter(archive=>archive.run.status==='completed').some(archive=>
     !saved.records.some(record=>record.path===archiveFile(archive).path && archiveFile(record.value).sha256===archiveFile(archive).sha256)))
     return {status:'UNKNOWN',reason:'ARCHIVE_NOT_CONFIRMED',observation};
   if(observation.readObservation.disposition==='UNRECOVERABLE')return {status:'BLOCKED',reason:'EVIDENCE_UNRECOVERABLE',observation};
-  if(budget.remaining===null || budget.unknownEvidence.length || budget.conflictEvidence.length)return {status:'UNKNOWN',reason:'EVIDENCE_INCOMPLETE',observation};
-  if(budget.inFlightWaveKeys.length)return {status:'WAIT',reason:'RUN_IN_FLIGHT',observation};
-  if(budget.remaining===0)return {status:'BLOCKED',reason:'FAILURE_BUDGET_EXHAUSTED',observation};
+  if(currentFacts.unknownEvidence.length || currentFacts.conflictEvidence.length)return {status:'UNKNOWN',reason:'EVIDENCE_INCOMPLETE',observation};
+  if(currentFacts.inFlightWaveKeys.length)return {status:'WAIT',reason:'RUN_IN_FLIGHT',observation};
   const request=context.cycle.dispatches.find(request=>request.canonicalRunId===runId);check(request,'canonical run required');
   if(context.cycle.dispatches.some(item=>item.continuationOfRunId===runId))return {status:'SATISFIED',reason:'CONTINUATION_RETAINS_ORIGINAL_HISTORY',observation};
   const expired=observation.native.runs.some(run=>run.runId===runId&&run.availability==='expired');
@@ -623,28 +672,10 @@ export async function recoverNativeCycle(input: EvidenceContext, runId: number, 
   if(attempt.invocations.length && attempt.invocations.every(invocation=>['EFFECT_CONFIRMED','REJECTED_BEFORE_BUSINESS'].includes(invocation.evidence.outcome??''))
     && !results.some(result=>result.reasonCode==='DEPENDENCY_NOT_READY'))
     return {status:'SATISFIED',reason:'EFFECTS_ARCHIVED',observation};
-  const adoptLimit=async(response:EvidenceResponse|null,platform?:NonNullable<NativeRetryLimit['platform']>)=>{
-    if(chain.length!==before.runAttempt)return {status:'UNKNOWN',reason:'LIMIT_HISTORY_INCOMPLETE',observation};
-    const age=Date.parse(observedAt)-Date.parse(chain[0]!.run.createdAt)>30*24*60*60_000;
-    const proof:NativeRetryLimit={schemaVersion:platform?2:1,repositoryId:context.repositoryId,cycleId:context.cycle.id,requestKey:request.requestKey,operationKey:request.operationKey,
-      observedAt,sourceUrl:`https://api.github.com/repos/${context.repository}/actions/runs/${runId}`,firstRun:chain[0]!.run,terminalRun:before,
-      reason:platform?'PLATFORM_LIMIT':age?'AGE':'RERUN_COUNT',...(platform?{platform}:{}),attemptEvidencePaths:chain.map(item=>archiveFile(item).path),response:response?{
-        sourceUrl:`https://api.github.com/repos/${context.repository}/actions/runs/${runId}/rerun-failed-jobs`,status:response.status,
-        body:new TextDecoder('utf-8',{fatal:true}).decode(response.bytes),digest:hash(response.bytes)}:null};
-    let file:ArchiveFile;
-    try{file=retryLimitFile(proof);verifyNativeRetryLimit(context,{path:file.path,commit:saved.head!,value:proof},saved.records);}catch{return {status:'UNKNOWN',reason:'NATIVE_LIMIT_UNPROVEN',observation};}
-    const adopted=await store.archive([file]);
-    if(!['APPLIED','UNCHANGED'].includes(adopted.status)||!adopted.head||!adopted.files?.some(item=>item.path===file.path&&item.content===file.content))
-      return {status:'UNKNOWN',reason:'LIMIT_NOT_ADOPTED',observation};
-    return {status:request.purpose==='build'?'BLOCKED':'CONTINUATION_REQUIRED',reason:request.purpose==='build'?'BUILD_CANNOT_CONTINUE':'NATIVE_RETRY_LIMIT',
-      retryLimitEvidencePath:file.path,runId,archiveHead:adopted.head,observation};
-  };
-  if(Date.parse(observedAt)-Date.parse(chain[0]!.run.createdAt)>30*24*60*60_000)return adoptLimit(null);
-  if(expired)return {status:'UNKNOWN',reason:'EXPIRED_RUN_WITHOUT_NATIVE_LIMIT',observation};
-  if(before.conclusion==='startup_failure') {
-    try{return await adoptLimit(null,await readPlatformLimit(reader,latestBefore));}
-    catch{return {status:'UNKNOWN',reason:'PLATFORM_LIMIT_UNPROVEN',observation};}
-  }
+  if(expired || before.runAttempt>=51 || Date.parse(observedAt)-Date.parse(chain[0]!.run.createdAt)>30*24*60*60_000)
+    return {status:'BLOCKED',reason:'NATIVE_MAINTENANCE_REQUIRED',runId,observation};
+  // One automatic native rerun per Run; further failures remain visible for native maintenance.
+  if(before.runAttempt>1)return {status:'BLOCKED',reason:'NATIVE_MAINTENANCE_REQUIRED',runId,observation};
   let path:string;
   if(['failure','cancelled','timed_out','action_required'].includes(before.conclusion ?? ''))path=`actions/runs/${runId}/rerun-failed-jobs`;
   else if(before.conclusion==='success' && results.some(result=>result.reasonCode==='DEPENDENCY_NOT_READY')) {
@@ -668,7 +699,6 @@ export async function recoverNativeCycle(input: EvidenceContext, runId: number, 
     const after=nativeRunFact(await reader.json(`actions/runs/${runId}`));sourceRun(context,request,after);
     if(after.runAttempt>before.runAttempt)return {status:'ACCEPTED',runId,observedAttempt:after.runAttempt,archiveHead:saved.head,observation};
     if(after.runAttempt<before.runAttempt)throw new Error('NATIVE_EVIDENCE: attempt regressed');
-    if(same(after,latestBefore)&&before.runAttempt-1>=50&&response?.status===422&&path===`actions/runs/${runId}/rerun-failed-jobs`)return adoptLimit(response);
     return {status:'UNKNOWN',reason:response && ![201,202].includes(response.status)?`RERUN_HTTP_${response.status}`:'RERUN_NOT_YET_OBSERVED',runId,observedAttempt:after.runAttempt,archiveHead:saved.head,observation};
   } catch {return {status:'UNKNOWN',reason:'RERUN_READBACK_UNAVAILABLE',runId,archiveHead:saved.head,observation};}
 }

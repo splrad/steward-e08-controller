@@ -53,12 +53,13 @@ it.each(['2.5.0','9.2.2','1.0.1'])('v1.54 rejects first-release Release-As %s be
   await expect(generateCandidate(B,f.options)).rejects.toThrow('CANDIDATE_FIRST_RELEASE_VERSION');
   expect(f.files.get('VERSION')).toBe('9.2.2\n');
 });
-it('v1.54 requires complete first-release history even when the candidate has the expected version',async()=>{
-  const f=firstLayerScape();f.commits.pop();await expect(generateCandidate(B,f.options)).rejects.toThrow('CANDIDATE_COMMIT_COVERAGE');
+it('uses native RP first-release calculation without a second per-commit coverage proof',async()=>{
+  const f=firstLayerScape();f.commits.pop();await expect(generateCandidate(B,f.options)).resolves.toMatchObject({status:'READY'});
 });
-it.each(['manifest','extra-manifest','root-bootstrap','package-draft','package-force','wrong-target','existing-release','existing-tag'])('v1.54 rejects first-release residue: %s',async kind=>{
+it.each(['manifest','manifest-current','extra-manifest','root-bootstrap','package-draft','package-force','wrong-target','existing-release','existing-tag'])('v1.54 rejects first-release residue: %s',async kind=>{
   const f=firstLayerScape(),config=JSON.parse(f.facts.config);
   if(kind==='manifest')f.facts.manifest=JSON.stringify({'.':'9.2.2'});
+  if(kind==='manifest-current')f.facts.manifest=JSON.stringify({'.':'1.0.0'});
   if(kind==='extra-manifest')f.facts.manifest=JSON.stringify({other:'9.2.2'});
   if(kind==='root-bootstrap')config['bootstrap-sha']=C;
   if(kind==='package-draft')config.packages['.'].draft=true;
@@ -69,6 +70,14 @@ it.each(['manifest','extra-manifest','root-bootstrap','package-draft','package-f
   f.facts.config=JSON.stringify(config);f.files.set('release-please-config.json',f.facts.config);f.files.set('.release-please-manifest.json',f.facts.manifest);
   await expect(generateCandidate(B,f.options)).rejects.toThrow('CANDIDATE_FIRST_RELEASE_INPUT');
   expect(f.files.get('VERSION')).toBe('9.2.2\n');
+});
+it('continues LayerScape from its recorded release boundary after the first release',async()=>{
+  const f=fixture();Object.assign(f.client.repository,{owner:'splrad',repo:'LayerScape'});
+  f.units[0]!.id='layerscape';
+  const result=await generateCandidate(B,f.options);
+  expect(result.status).toBe('READY');
+  if(result.status!=='READY')throw Error('expected candidate');
+  expect(result.snapshot.units).toEqual([{id:'layerscape',path:'.',version:'1.1.0',tag:'v1.1.0'}]);
 });
 it.each([false, true])('uses actual upstream generation and manifest versions for multi=%s', async multi => {
   const f = fixture(multi), result = await generateCandidate(B, f.options);
@@ -113,9 +122,9 @@ it('reaches the real release boundary beyond default commit search depths', asyn
   const result = await generateCandidate(B, f.options);
   expect(result.status).toBe('READY'); expect(result.status === 'READY' && result.snapshot.units[0]!.version).toBe('1.1.0');
 });
-it('rejects a truncated iterator even when upstream emits only a warning', async () => {
+it('uses native RP iterator semantics without a second all-commit coverage gate', async () => {
   const f = fixture(); f.commits.pop();
-  await expect(generateCandidate(B, f.options)).rejects.toThrow('CANDIDATE_COMMIT_COVERAGE');
+  await expect(generateCandidate(B, f.options)).resolves.toMatchObject({status:'READY'});
 });
 it('projects Go path tags and Python prereleases through their native upstream strategies', async () => {
   const f = fixture(true), config = JSON.stringify({ 'separate-pull-requests': false, packages: {
@@ -148,4 +157,42 @@ it('keeps native workspace dependency propagation and all package projections', 
     { id: 'lib', path: 'lib', version: '1.1.0', tag: 'lib-v1.1.0' }]);
   const app = JSON.parse(result.snapshot.files.find(file => file.path === 'app/package.json')!.content!);
   expect(app).toMatchObject({ version: '1.0.1', dependencies: { lib: '^1.1.0' } });
+});
+
+
+it.each(['tag', 'baseline', 'full-tree'] as const)('keeps an app baseline separate from a lib %s boundary', async kind => {
+  const f = fixture(true), older = 'e'.repeat(40), oldFeature = 'f'.repeat(40);
+  f.facts.manifest = JSON.stringify({app:'1.1.0',lib:kind==='full-tree'?'0.0.0':'1.0.0'});
+  f.files.set('.release-please-manifest.json', f.facts.manifest); f.files.set('app/version.txt','1.1.0\n');
+  f.facts.boundaries = [{path:'app',kind:'baseline',sha:C,reference:'app-cycle',found:true},
+    {path:'lib',kind,sha:kind==='full-tree'?null:older,reference:kind==='full-tree'?null:'lib-v1.0.0',found:true}];
+  f.commits.splice(0,f.commits.length,
+    {sha:B,message:'fix: current app repair',files:['app/code.ts']},
+    {sha:C,message:'chore: app version 1.1.0',files:[]},
+    {sha:oldFeature,message:'feat: app already released\n\nfix: lib change',files:['app/code.ts','lib/code.ts']},
+    {sha:older,message:'chore: old lib boundary',files:[]});
+  f.client.releaseIterator=async function*(){if(kind==='tag')yield {id:2,tagName:'lib-v1.0.0',sha:older,url:'https://github.com/fixture/product/releases/2',notes:''};};
+  f.facts.releases=kind==='tag'?[{id:2,tag:'lib-v1.0.0',sha:older,bodyDigest:'d'.repeat(64),draft:false}]:[];
+  const result=await generateCandidate(B,f.options);
+  expect(result.status).toBe('READY');if(result.status!=='READY')throw Error('candidate required');
+  expect(result.snapshot.units.find(u=>u.id==='app')?.version).toBe('1.1.1');
+  expect(result.snapshot.units.find(u=>u.id==='lib')?.version).toBe(kind==='full-tree'?'1.0.0':'1.1.0');
+  expect(result.snapshot.files.find(file=>file.path==='app/CHANGELOG.md')?.content).not.toContain('already released');
+});
+
+
+it('applies baseline input before native workspace dependency propagation', async () => {
+  const f=fixture(true),older='e'.repeat(40),oldFeature='f'.repeat(40);
+  const config=JSON.stringify({'separate-pull-requests':false,plugins:['node-workspace'],packages:{app:{'release-type':'node',component:'app'},lib:{'release-type':'node',component:'lib'}}});
+  f.facts.config=config;f.files.set('release-please-config.json',config);
+  f.facts.manifest=JSON.stringify({app:'1.1.0',lib:'1.0.0'});f.files.set('.release-please-manifest.json',f.facts.manifest);
+  f.files.set('app/package.json',JSON.stringify({name:'app',version:'1.1.0',dependencies:{lib:'^1.0.0'}}));
+  f.files.set('lib/package.json',JSON.stringify({name:'lib',version:'1.0.0'}));
+  f.facts.boundaries=[{path:'app',kind:'baseline',sha:C,reference:'app-cycle',found:true},{path:'lib',kind:'tag',sha:older,reference:'lib-v1.0.0',found:true}];
+  f.commits.splice(0,f.commits.length,{sha:B,message:'feat: lib API',files:['lib/api.ts']},{sha:C,message:'chore: app release',files:[]},
+    {sha:oldFeature,message:'feat: app already released',files:['app/api.ts']},{sha:older,message:'chore: lib release',files:[]});
+  f.client.releaseIterator=async function*(){yield {id:2,tagName:'lib-v1.0.0',sha:older,url:'https://github.com/fixture/product/releases/2',notes:''};};
+  const result=await generateCandidate(B,f.options);if(result.status!=='READY')throw Error('candidate required');
+  expect(result.snapshot.units.map(u=>[u.id,u.version])).toEqual([['app','1.1.1'],['lib','1.1.0']]);
+  expect(JSON.parse(result.snapshot.files.find(file=>file.path==='app/package.json')!.content!).dependencies.lib).toBe('^1.1.0');
 });

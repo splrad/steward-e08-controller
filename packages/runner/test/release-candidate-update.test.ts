@@ -27,18 +27,15 @@ async function fixture() {
   const commit = async (path: string, content: string, message = 'Human edit') => { await writeFile(join(repo, path), content); await git('add', '--', path); await git('commit', '--signoff', '-m', message); return git('rev-parse', 'HEAD'); };
   return { root, repo, git, B, notes, snapshot, commit };
 }
-it('merges two human commits with new main, preserving complete B and both parents', async () => {
+it('stops on human edits instead of merging with new main', async () => {
   const f = await fixture(), G = f.snapshot(); await f.git('switch', '-c', 'steward/release-candidate');
   await f.commit('.release-notes/app.md', f.notes.replace('原来概述', '人工概述'));
   const H = await f.commit('.release-notes/app.md', f.notes.replace('原来概述', '人工概述').replace('原来恢复', '人工恢复'));
   await f.git('switch', 'main'); const B = await f.commit('code.txt', 'main advanced\n', 'fix: source');
   const N = f.snapshot(B, f.notes.replace('原来内容', '自动更新内容'));
   const merged = await mergeCandidate(f.repo, G, H, N, f.root);
-  expect(merged.status).toBe('READY'); expect(merged.files[0]!.content).toContain('人工概述'); expect(merged.files[0]!.content).toContain('人工恢复'); expect(merged.files[0]!.content).toContain('自动更新内容');
-  const prepared = await prepareCandidateWrite(f.repo, H, N, merged, identity, f.root);
-  const commit = Buffer.from(prepared.objects.find(o => o.type === 'commit')!.bytes, 'base64').toString();
-  expect(commit).toContain(`parent ${H}\nparent ${B}\n`); expect(commit.match(/Signed-off-by:/g)).toHaveLength(1);
-  expect(await f.git('status', '--porcelain')).toBe(''); expect(await f.git('rev-parse', 'HEAD')).toBe(B);
+  expect(merged).toMatchObject({status:'CONFLICT',conflictPaths:['.release-notes/app.md']});
+  expect(await f.git('show', `${H}:.release-notes/app.md`)).toContain('人工恢复');
 });
 it('preserves H and G on text conflict and rejects manual non-note code', async () => {
   const f = await fixture(), G = f.snapshot(), H = await f.commit('.release-notes/app.md', f.notes.replace('原来内容', '人工内容'));
@@ -49,11 +46,11 @@ it('preserves H and G on text conflict and rejects manual non-note code', async 
   const changed = await f.commit('code.txt', 'manual code\n');
   expect((await mergeCandidate(f.repo, G, changed, f.snapshot(), f.root)).conflictPaths).toContain('code.txt');
 });
-it('adopts old PR notes without G byte-for-byte and retains the complete override', async () => {
+it('stops on legacy human notes and preserves their bytes', async () => {
   const f = await fixture(), text = f.notes.replace('原来内容', '人工发布内容'), H = await f.commit('.release-notes/app.md', text);
   const result = await mergeCandidate(f.repo, null, H, f.snapshot(), f.root);
-  expect(result).toMatchObject({ status: 'READY', adoption: { humanHead: H, generatedBase: f.B, differences: [{ content: text }] } });
-  expect(result.files[0]!.content).toBe(text);
+  expect(result.status).toBe('CONFLICT');
+  expect(await f.git('show', `${H}:.release-notes/app.md`)).toBe(text.trim());
 });
 it('distinguishes empty notes from a deleted note and rejects delete/modify conflicts', async () => {
   const f = await fixture(), H = await f.commit('.release-notes/app.md', '');
@@ -147,32 +144,54 @@ it('a large same-PR preview links the exact archive commit and changes only the 
   const own = f.comments.find(c => c.authorId === 42)!; expect(Buffer.byteLength(own.body)).toBeLessThanOrEqual(48 * 1024);
   expect(own.body).toContain(`/blob/${'f'.repeat(40)}/generated/${digest}/preview.md`); expect(f.pr.body).toBe('Human metadata');
 });
-it('adopts the verified human notes head and clears an earlier conflict when no tree write is needed', async () => {
+it.each(['retired', 'human-change', 'unrelated-open'])('starts the next candidate with a %s fixed branch without discarding edits', async kind => {
+  const f = await controllerFixture(), closed = { ...f.pr, state: 'closed' as const, merged: true };
+  f.session.repository.lastCompletedCycleId = `pr-9-${f.B}`;
+  f.session.repository.candidate = null; f.session.generated = null;
+  const B = await f.commit('code.txt', 'Next reviewed product implementation\n');
+  f.io.source = async () => ({ baseSha: B, authors: [{ id: 7, evidence: 'Verified' }], authorsDigest: digest });
+  f.setSnapshot(f.snapshot(B, f.notes.replace('原来内容', '下一周期内容')));
+  let next: CandidatePullRequest | null = kind === 'unrelated-open' ? { ...closed, state: 'open', merged: false, number: 11 } : null;
+  if (kind === 'human-change') f.pr.head = await f.commit('code.txt', 'Unreviewed branch edit\n');
+  f.io.pullRequests = async () => [closed, ...(next ? [next] : [])];
+  f.io.createPullRequest = async value => { next = { number: 10, head: f.pr.head, branch: value.branch, base: value.base,
+    state: 'open', merged: false, editing: false, body: value.body }; };
+  if (kind === 'unrelated-open') {
+    await expect(advanceReleaseCandidate(f.session, f.io)).rejects.toThrow('CANDIDATE_UNRELATED_OPEN_PR');
+    expect(f.pushes()).toBe(0); return;
+  }
+  const result = await advanceReleaseCandidate(f.session, f.io);
+  if (kind === 'human-change') { expect(result).toMatchObject({ status: 'CONFLICT', reason: 'SOURCE_CHANGED' }); expect(f.pushes()).toBe(0); return; }
+  expect(result).toMatchObject({ status: 'READY', prNumber: 10 });
+  expect(f.pushes()).toBe(1);
+  expect(await f.git('show', `${f.pr.head}:code.txt`)).toBe('Next reviewed product implementation');
+  expect(await f.git('show', '-s', '--format=%P', f.pr.head)).toBe(`${closed.head} ${B}`);
+  expect(await advanceReleaseCandidate(f.session, f.io)).toMatchObject({ status: 'READY', prNumber: 10 });
+  expect(f.pushes()).toBe(1);
+});
+it('keeps human differences paused without reclassifying them as generated', async () => {
   const f = await controllerFixture(), N = structuredClone(f.session.generated!);
   const reviewed = f.notes.replace('原来概述', '人工审核概述').replace(/\n/g, '\r\n');
   const human = await f.commit('.release-notes/app.md', reviewed);
   f.pr.head = human; f.session.conflict = { head: f.B, generated: N, paths: ['code.txt'] };
-  expect(await advanceReleaseCandidate(f.session, f.io)).toMatchObject({ status: 'READY', prNumber: 9, head: human });
-  expect(f.session.repository.candidate!.publishedHead).toBe(human); expect(f.session.conflict).toBeNull();
-  expect(f.session.generated).toEqual(N); expect(f.pushes()).toBe(0); expect(f.pr.body).toBe('Human metadata');
-  expect(f.session.preview).toContain('人工审核概述'); expect(f.session.preview).not.toContain('\r');
+  expect(await advanceReleaseCandidate(f.session,f.io)).toMatchObject({status:'CONFLICT',reason:'HUMAN_EDIT_CONFLICT'});
+  expect(f.pushes()).toBe(0);
   expect(await f.git('show', `${human}:.release-notes/app.md`)).toBe(reviewed.trim());
 });
-it('an unaccepted pending write is archived before acknowledging editing, with no deadlock or push', async () => {
+it('an unaccepted pending write is archived before pausing for editing, with no deadlock or push', async () => {
   const f = await controllerFixture(), N = f.snapshot(f.B, f.notes.replace('原来内容', '自动内容'));
   const prepared = await prepareCandidateWrite(f.repo, f.B, N, await mergeCandidate(f.repo, f.snapshot(), f.B, N, f.root), identity, f.root);
   f.session.pending = { write: prepared, generated: N }; f.session.repository.candidate!.pendingWrite = { proposedCommit: prepared.proposedCommit };
   f.pr.editing = true;
   expect(await advanceReleaseCandidate(f.session, f.io)).toMatchObject({ reason: 'EDITING', head: f.B });
-  expect(f.session.pending).toBeNull(); expect(f.session.repository.candidate!.pendingWrite).toBeNull(); expect(f.session.repository.candidate!.editingAckHead).toBe(f.B);
+  expect(f.session.pending).toBeNull(); expect(f.session.repository.candidate!.pendingWrite).toBeNull(); expect(f.session.repository.candidate!.editingAckHead).toBeNull();
   expect(f.pushes()).toBe(0); expect(f.generations()).toBe(0);
 });
-it('legacy six-section notes preserve every original byte while adding only the new changes section', async () => {
+it('legacy six-section notes are not automatically rewritten', async () => {
   const f = await fixture(), legacy = '## 概述\n\n人工概述\n\n## 兼容性\n\n人工兼容性\n\n## 升级与迁移\n\n人工升级\n\n## 安装说明\n\n人工安装\n\n## 已知问题\n\n人工问题\n\n## 恢复\n\n人工恢复\n';
   const H = await f.commit('.release-notes/app.md', legacy), N = f.snapshot(f.B, legacy.replace('## 兼容性', '## 更新内容\n\n新功能。\n\n## 兼容性'));
-  const result = await mergeCandidate(f.repo, null, H, N, f.root); expect(result.status).toBe('READY');
-  expect(result.files[0]!.content!.replace('## 更新内容\n\n新功能。\n\n\n', '')).toBe(legacy);
-  expect(result.adoption!.differences[0]!.content).toBe(legacy);
+  const result=await mergeCandidate(f.repo,null,H,N,f.root);expect(result.status).toBe('CONFLICT');
+  expect(await f.git('show',`${H}:.release-notes/app.md`)).toBe(legacy.trim());
 });
 it.each(['base', 'head'])('retires a known unadopted proposal after %s drift and resumes the same PR', async change => {
   const f = await controllerFixture(), G = structuredClone(f.session.generated), N = f.snapshot(f.B, f.notes.replace('原来内容', '自动内容'));
@@ -186,6 +205,7 @@ it.each(['base', 'head'])('retires a known unadopted proposal after %s drift and
   f.setSnapshot(f.snapshot(change === 'base' ? advanced : f.B, N.files[0]!.content!));
   expect(await advanceReleaseCandidate(f.session, f.io)).toMatchObject({ status: 'WAIT', reason: 'REPLAN' });
   expect(f.session.pending).toBeNull(); expect(f.session.generated).toEqual(G); expect(f.pushes()).toBe(0);
+  if (change === 'head') { expect(await advanceReleaseCandidate(f.session,f.io)).toMatchObject({status:'CONFLICT'}); expect(f.pushes()).toBe(0); return; }
   expect(await advanceReleaseCandidate(f.session, f.io)).toMatchObject({ status: 'READY', prNumber: 9 });
   expect(f.pushes()).toBe(1); expect(f.pr.body).toBe('Human metadata');
   const notes = await f.git('show', `${f.pr.head}:.release-notes/app.md`); expect(notes).toContain('自动内容');
@@ -220,4 +240,16 @@ it('freezes contributors per unit and renders only that unit native identities',
   expect(f.session.identity!.units.map(u => [u.id, u.contributors.contributors.map(c => c.id), u.contributors.unresolved])).toEqual([['app', [10], 0], ['lib', [11], 1]]);
   const [app, lib] = f.session.preview!.split('# .release-notes/lib.md');
   expect(app).toContain('user-10'); expect(app).not.toContain('user-11'); expect(lib).toContain('user-11'); expect(lib).not.toContain('user-10');
+});
+
+it('does not gate candidate generation on an existing cycle or channel completion',async()=>{
+  const f=await controllerFixture(); f.session.repository.activeCycleId=`pr-8-${f.B}`;
+  expect(await advanceReleaseCandidate(f.session,f.io)).toMatchObject({status:'READY',prNumber:9});
+  expect(f.generations()).toBe(1);
+});
+it('keeps the reviewed candidate bytes when automatic draft generation fails',async()=>{
+  const f=await controllerFixture(), previous=structuredClone(f.session.generated), head=f.pr.head;
+  f.io.content=async()=>({status:'FAILED'});
+  expect(await advanceReleaseCandidate(f.session,f.io)).toMatchObject({status:'WAIT',reason:'CONTENT_FAILED'});
+  expect(f.session.generated).toEqual(previous);expect(f.pr.head).toBe(head);expect(f.pushes()).toBe(0);
 });

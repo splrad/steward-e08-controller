@@ -35,6 +35,12 @@ interface Asset { id: number; name: string; size: number; digest: string | null;
 export interface ReleaseTarget { manifest: ReleaseManifest | ProductReleaseManifest; releaseId: number; directory: string; appBotId: number }
 export type ReleaseIntent = Omit<ReleaseTarget, 'releaseId'> & { releaseId: number | null };
 export type ReleaseDownload = (repository: string, assetId: number, destination: string, anonymous: boolean) => Promise<void>;
+export async function releaseReadIsAnonymous(gh:GhCommand,repository:string,repositoryId:number):Promise<boolean> {
+  const value=JSON.parse(await gh(['api',`repos/${repository}`]));
+  if(value.id!==repositoryId||value.full_name!==repository||value.archived!==false||value.disabled!==false||typeof value.private!=='boolean')
+    reject('repository visibility');
+  return value.private===false;
+}
 export function nativeReleaseDownload(token: string | undefined): ReleaseDownload {
   return async (repository, id, destination, anonymous) => {
     if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) || !Number.isSafeInteger(id) || id < 1) reject('download identity');
@@ -61,7 +67,8 @@ export class NativeGitHubRelease {
     if (m.schemaVersion === 3) validateProductManifest(m); else validateReleaseManifest(m);
     if (!Number.isSafeInteger(target.appBotId) || target.appBotId < 1) reject('App identity');
     const repository = await this.json(['api', `repos/${m.fullName}`]);
-    if (repository.id !== m.repositoryId || repository.full_name !== m.fullName || repository.archived !== false || repository.disabled !== false) reject('repository identity or disabled');
+    if (repository.id !== m.repositoryId || repository.full_name !== m.fullName || repository.archived !== false || repository.disabled !== false
+      || typeof repository.private !== 'boolean') reject('repository identity or disabled');
     return repository;
   }
   private async tagSource(target: ReleaseIntent): Promise<string | null> {

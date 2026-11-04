@@ -94,7 +94,6 @@
                 "baseSha",
                 "generatedSnapshotPath",
                 "publishedHead",
-                "editingAckHead",
                 "statusCommentId",
                 "contentGenerationDigest",
                 "adoptionOverride",

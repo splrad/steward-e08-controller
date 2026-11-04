@@ -5,7 +5,7 @@ import { validateContentInput, validateContentResult } from './release-content.j
 
 export interface CandidateArchiveChunk {
   schemaVersion: 1; repositoryId: number; candidateId: string;
-  documentKind: 'session' | 'content' | 'cache' | 'generated' | 'adoption' | 'native-input' | 'content-result' | 'content-payload' | 'content-evidence' | 'cache-entry';
+  documentKind: 'session' | 'content' | 'cache' | 'generated' | 'adoption' | 'native-input' | 'content-result' | 'content-payload' | 'content-evidence' | 'cache-entry' | 'merged-candidate' | 'repair-decision';
   documentDigest: string; index: number; count: number; content: string;
 }
 const exact = (value: any, keys: string[]) => { if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -15,7 +15,7 @@ export function decodeCandidateArchive(bytes: Uint8Array, repositoryId: number):
   const record = decodeBuildJson(bytes) as CandidateArchiveChunk;
   exact(record, ['schemaVersion', 'repositoryId', 'candidateId', 'documentKind', 'documentDigest', 'index', 'count', 'content']);
   if (record.schemaVersion !== 1 || record.repositoryId !== repositoryId || !/^[a-f0-9]{64}$/.test(record.candidateId)
-    || !['session', 'content', 'cache', 'generated', 'adoption', 'native-input', 'content-result', 'content-payload', 'content-evidence', 'cache-entry'].includes(record.documentKind) || !/^[a-f0-9]{64}$/.test(record.documentDigest)
+    || !['session', 'content', 'cache', 'generated', 'adoption', 'native-input', 'content-result', 'content-payload', 'content-evidence', 'cache-entry', 'merged-candidate', 'repair-decision'].includes(record.documentKind) || !/^[a-f0-9]{64}$/.test(record.documentDigest)
     || !Number.isSafeInteger(record.count) || record.count < 1 || !Number.isSafeInteger(record.index) || record.index < 0 || record.index >= record.count
     || typeof record.content !== 'string' || new TextEncoder().encode(record.content).length > 256 * 1024) throw new Error('CANDIDATE_ARCHIVE_INVALID');
   return record;
@@ -46,7 +46,7 @@ export async function decodeCandidateDocument(chunks: CandidateArchiveChunk[]): 
     if (typeof value.evidencePath !== 'string' || !value.evidencePath.startsWith(`content/${first.candidateId}/`)) throw new Error('CONTENT_EVIDENCE_PATH');
   } else if (first.documentKind === 'content-payload') {
     exact(value, ['stage', 'unitIds', 'units', 'sources', 'items', 'background']);
-    if (!['CONTEXT', 'DIFF', 'COMPOSE'].includes(value.stage) || !Array.isArray(value.sources) || !Array.isArray(value.items) || !Array.isArray(value.background)) throw new Error('CONTENT_PAYLOAD_INVALID');
+    if (!['DRAFT', 'CONTEXT', 'DIFF', 'COMPOSE'].includes(value.stage) || !Array.isArray(value.sources) || !Array.isArray(value.items) || !Array.isArray(value.background)) throw new Error('CONTENT_PAYLOAD_INVALID');
   } else if (first.documentKind === 'content-evidence') {
     exact(value, ['manifests', 'gaps']);
     if (!Array.isArray(value.manifests) || !Array.isArray(value.gaps)) throw new Error('CONTENT_EVIDENCE_INVALID');
@@ -59,9 +59,9 @@ export async function decodeCandidateDocument(chunks: CandidateArchiveChunk[]): 
     }
   } else if (first.documentKind === 'cache-entry') {
       const entry = value;
-      exact(entry, ['inputDigest', 'configDigest', 'attempts', 'result', 'split']);
+      exact(entry, ['inputDigest', 'configDigest', 'attempts', 'result', ...('split' in entry ? ['split'] : [])]);
       if (!/^[a-f0-9]{64}$/.test(entry.inputDigest) || !/^[a-f0-9]{64}$/.test(entry.configDigest)
-        || !Array.isArray(entry.attempts) || entry.attempts.length > 3 || typeof entry.split !== 'boolean') throw new Error('CONTENT_CACHE_INVALID');
+        || !Array.isArray(entry.attempts) || entry.attempts.length > 3 || 'split' in entry && typeof entry.split !== 'boolean') throw new Error('CONTENT_CACHE_INVALID');
   } else if (first.documentKind === 'session') {
     exact(value, ['generated', 'pending', 'identity', 'conflict', 'preview', 'adoption']);
     if (value.generated) snapshot(value.generated);
@@ -83,8 +83,54 @@ export async function decodeCandidateDocument(chunks: CandidateArchiveChunk[]): 
     if (value.adoption) exact(value.adoption, ['humanHead', 'generatedBase', 'differences']);
   } else if (first.documentKind === 'content-result') {
     exact(value, ['stage', 'sourceIds', 'result']);
-    if (!['CONTEXT', 'DIFF', 'COMPOSE'].includes(value.stage) || !Array.isArray(value.sourceIds)) throw new Error('CONTENT_RESULT_INVALID');
+    if (!['DRAFT', 'CONTEXT', 'DIFF', 'COMPOSE'].includes(value.stage) || !Array.isArray(value.sourceIds)) throw new Error('CONTENT_RESULT_INVALID');
     validateContentResult(value.stage, JSON.stringify(value.result), value.sourceIds);
+  } else if (first.documentKind === 'merged-candidate') {
+    exact(value, ['schemaVersion', 'cycleId', 'sourceSha', 'stateCommit', 'candidate', 'session', 'pull', 'documents']);
+    exact(value.pull, ['number', 'head', 'branch', 'base', 'repositoryId', 'mergedAt', 'mergeCommitSha']);
+    exact(value.candidate, ['id', 'prNumber', 'branch', 'baseSha', 'generatedSnapshotPath', 'publishedHead', ...('editingAckHead' in value.candidate ? ['editingAckHead'] : []), 'statusCommentId',
+      'contentGenerationDigest', 'adoptionOverride', 'observedLabelEventIds', 'pendingWrite']);
+    if (value.schemaVersion !== 1 || value.candidate.id !== first.candidateId || value.candidate.prNumber !== value.pull.number
+      || value.cycleId !== `pr-${value.pull.number}-${value.sourceSha}` || value.pull.repositoryId !== first.repositoryId
+      || value.pull.mergeCommitSha !== value.sourceSha || value.pull.head !== value.candidate.publishedHead
+      || value.pull.branch !== value.candidate.branch || !Number.isFinite(Date.parse(value.pull.mergedAt))
+      || ![value.sourceSha, value.stateCommit, value.pull.head, value.candidate.baseSha].every(v => /^[a-f0-9]{40}$/.test(v))
+      || value.candidate.pendingWrite !== null || !value.session.generated || !value.session.identity || value.session.pending || value.session.conflict
+      || !Array.isArray(value.documents) || !value.documents.length) throw new Error('MERGED_CANDIDATE_IDENTITY');
+    const sessionText = JSON.stringify(value.session);
+    await decodeCandidateDocument([{ ...first, documentKind: 'session', index: 0, count: 1, content: sessionText, documentDigest: await sha256Hex(sessionText) }]);
+    const paths = new Set<string>();
+    for (const document of value.documents) {
+      exact(document, ['path', 'sha256']);
+      if (!/^(?:generated|content)\/[A-Za-z0-9_/-]+\.(?:md|json)$/.test(document.path)
+        || !/^[a-f0-9]{64}$/.test(document.sha256) || paths.has(document.path)) throw new Error('MERGED_CANDIDATE_DOCUMENTS');
+      paths.add(document.path);
+    }
+    if (!paths.has(`generated/${first.candidateId}/session.json`) || !paths.has(value.candidate.generatedSnapshotPath)) throw new Error('MERGED_CANDIDATE_DOCUMENTS');
+  } else if (first.documentKind === 'repair-decision') {
+    exact(value, ['schemaVersion', 'repositoryId', 'repository', 'cycleId', 'sourceSha', 'observedAt', 'originalStateCommit',
+      'originalCandidateId', 'event', 'originalActiveCycleIds', 'objects', 'inventories']);
+    exact(value.event, ['id', 'actorId', 'createdAt', 'label', 'url']);
+    exact(value.inventories, ['issueEventsCount', 'issueEventsDigest', 'releasesCount', 'releasesDigest', 'tagsCount', 'tagsDigest']);
+    if (value.schemaVersion !== 1 || value.repositoryId !== first.repositoryId || value.originalCandidateId !== first.candidateId
+      || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value.repository) || !/^pr-[1-9][0-9]*-[a-f0-9]{40}$/.test(value.cycleId)
+      || !value.cycleId.endsWith('-' + value.sourceSha) || ![value.sourceSha, value.originalStateCommit].every(v => /^[a-f0-9]{40}$/.test(v))
+      || ![value.event.id, value.event.actorId].every(v => Number.isSafeInteger(v) && v > 0)
+      || ![value.observedAt, value.event.createdAt].every(v => Number.isFinite(Date.parse(v))) || Date.parse(value.event.createdAt) > Date.parse(value.observedAt)
+      || !/^release:(?:abandoned|supersede-required)(?::[a-z][a-z0-9-]*)?$/.test(value.event.label)
+      || value.event.url !== `https://api.github.com/repos/${value.repository}/issues/events/${value.event.id}`
+      || !Array.isArray(value.originalActiveCycleIds) || !value.originalActiveCycleIds.includes(value.cycleId)
+      || value.originalActiveCycleIds.some((v: unknown) => typeof v !== 'string' || !/^pr-[1-9][0-9]*-[a-f0-9]{40}$/.test(v))
+      || new Set(value.originalActiveCycleIds).size !== value.originalActiveCycleIds.length || !Array.isArray(value.objects) || !value.objects.length)
+      throw new Error('REPAIR_DECISION_ARCHIVE_IDENTITY');
+    for (const object of value.objects) {
+      exact(object, ['unitId', 'tag', 'sourceSha', 'releaseId']);
+      if (!/^[a-z][a-z0-9-]*$/.test(object.unitId) || typeof object.tag !== 'string' || !object.tag || object.sourceSha !== value.sourceSha
+        || object.releaseId !== null && (!Number.isSafeInteger(object.releaseId) || object.releaseId < 1)) throw new Error('REPAIR_DECISION_ARCHIVE_OBJECT');
+    }
+    if (new Set(value.objects.map((object: any) => object.unitId)).size !== value.objects.length) throw new Error('REPAIR_DECISION_ARCHIVE_OBJECT');
+    for (const key of ['issueEvents', 'releases', 'tags']) if (!Number.isSafeInteger(value.inventories[key + 'Count']) || value.inventories[key + 'Count'] < 0
+      || !/^[a-f0-9]{64}$/.test(value.inventories[key + 'Digest'])) throw new Error('REPAIR_DECISION_ARCHIVE_INVENTORY');
   } else if (first.documentKind === 'native-input') {
     exact(value, ['facts', 'protections']);
     exact(value.protections, ['branch', 'tags']);

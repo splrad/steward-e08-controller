@@ -7,7 +7,7 @@ import YAML from 'yaml';
 
 const policyRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const toolIds = { jactionlint: 'github:jdx/jactionlint', zizmor: 'aqua:zizmorcore/zizmor',
-  shellcheck: 'aqua:koalaman/shellcheck', pyflakes: 'pypi:pyflakes', python: 'python' } as const;
+  shellcheck: 'aqua:koalaman/shellcheck', ruff: 'aqua:astral-sh/ruff' } as const;
 
 export async function assertPolicyNodeVersion(runtimeRoot = policyRoot): Promise<void> {
   runtimeRoot = resolve(runtimeRoot);
@@ -182,7 +182,7 @@ export async function scanWorkflows(workspace: string, paths: readonly string[],
     delete isolated.Path;
     run(tools.jactionlint, ['--profile', 'correctness', '--strict-exit', '--no-ignores', '--no-online', '--no-color',
       '--config-file', join(policyRoot, '.github/jactionlint.yaml'), '--shellcheck', tools.shellcheck,
-      '--pyflakes', tools.pyflakes, '--', ...files], temporary, isolated, results);
+      '--ruff', tools.ruff, '--', ...files], temporary, isolated, results);
     const output = run(tools.zizmor, ['--offline', '--no-config', '--no-ignores', '--strict-collection', '--no-progress', '--color', 'never', '--format=json-v1', ...files], temporary, isolated, results, [0, 14]);
     const findings = JSON.parse(output);
     if (!Array.isArray(findings) || (results.at(-1)!.status === 0 && findings.length !== 0)) throw new Error('zizmor failed: unknown JSON result');

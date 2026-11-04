@@ -9,7 +9,7 @@ export async function verifyToolchain(root = process.cwd(), runtimeRoot = root) 
   });
   if (result.error || result.status !== 0) throw new Error('mise locked tool inventory is unavailable');
   const inventory = JSON.parse(result.stdout);
-  for (const tool of ['node', 'npm', 'github:jdx/jactionlint', 'aqua:koalaman/shellcheck', 'python', 'pypi:pyflakes',
+  for (const tool of ['node', 'npm', 'github:jdx/jactionlint', 'aqua:koalaman/shellcheck', 'python', 'aqua:astral-sh/ruff',
     'aqua:astral-sh/uv', 'aqua:zizmorcore/zizmor', 'aqua:cli/cli',
     'aqua:lycheeverse/lychee', 'aqua:oras-project/oras', 'aqua:anchore/syft']) {
     const entries = inventory[tool];

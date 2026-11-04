@@ -55,9 +55,15 @@ it('invokes the fixed entry sequence and recovers only native canonical Run IDs'
   expect(calls).toEqual(['candidate','dispatch-build','publish','dispatch-channel','observe-channel','rerun:100']);expect(result.status).toBe('WAIT');
 });
 it('ends a repository wake after the single publish invocation',async()=>{
-  const calls:string[]=[],snapshot={repository:{activeCycleId:'cycle'},cycles:[]};
+  const calls:string[]=[],snapshot={repository:{activeCycleId:'cycle'},cycles:[{value:{id:'cycle',dispatches:[]}}]};
   const result=await serviceReleaseWake({},async()=>snapshot,async(command:string)=>{calls.push(command);return {status:'WAIT',publishInvoked:command==='publish'};});
   expect(calls).toEqual(['candidate','dispatch-build','publish']);expect(result.publishInvoked).toBe(true);
+});
+it('retains private recovery age scheduling from the canonical rerun entry',async()=>{
+  const snapshot={repository:{activeCycleId:'cycle'},cycles:[{value:{id:'cycle',dispatches:[{canonicalRunId:100}]}}]},nextCheckAt='2026-11-26T00:00:00.001Z';
+  const result=await serviceReleaseWake({},async()=>snapshot,async(command:string)=>command==='rerun'
+    ?{status:'UNKNOWN',reason:'PRIVATE_RETRY_LIMIT_UNPROVEN',nextCheckAt}:{status:'WAIT',publishInvoked:false});
+  expect(result).toMatchObject({status:'UNKNOWN',nextCheckAt});
 });
 it('keeps health failure separate from successful business service and never repeats that service',async()=>{
   let calls=0;await expect(coordinateReleaseWake({discover:async()=>[{id:1}],observe:async()=>({nextCheckAt:null}),service:async()=>{calls++;return {status:'COMPLETE'};},health:async()=>{throw new Error('health unavailable');}},()=>START)).rejects.toThrow('health unavailable');expect(calls).toBe(1);
@@ -76,4 +82,40 @@ it('isolates inaccessible, archived and disabled repositories without changing t
     service:async(repo:any)=>{serviced.push(repo.id);return {status:'WAIT'};},health:async()=>{}},()=>START);
   expect(observed).toEqual([1,4]);expect(serviced).toEqual([4]);expect(result.counts.unknown).toBe(1);
   expect(JSON.stringify(result)).not.toMatch(/private|denied|403/);expect(result.scanCompletedAt).toBeNull();
+});
+
+it('prepares the next candidate and services both a new release and an old pending distribution',async()=>{
+  const calls:string[]=[],snapshot={repository:{activeCycleId:'new'},cycles:[
+    {value:{id:'old',completedEvidencePath:'evidence/completion/old.json',dispatches:[{canonicalRunId:100}]}},
+    {value:{id:'new',completedEvidencePath:null,dispatches:[]}}],domainRecords:[]};
+  await serviceReleaseWake({},async()=>snapshot,async(command:string,input:any)=>{
+    calls.push(`${command}:${input.cycleId}`);return {status:'WAIT',publishInvoked:false};
+  });
+  expect(calls).toEqual(['candidate:new','dispatch-channel:old','observe-channel:old','rerun:old','dispatch-build:new','publish:new','dispatch-channel:new','observe-channel:new']);
+});
+
+it('honors an old cycle read backoff while preparing and building the next registered candidate',async()=>{
+  const calls:string[]=[],snapshot={repository:{activeCycleId:'new'},cycles:[{value:{id:'old'}},{value:{id:'new',dispatches:[]}}],
+    domainRecords:[{path:'evidence/reads/old.json',value:{cycleId:'old',observedAt:new Date(START).toISOString(),nextCheckAt:new Date(START+60_000).toISOString()}}]};
+  await serviceReleaseWake({},async()=>snapshot,async(command:string,input:any)=>{calls.push(`${command}:${input.cycleId}`);return {status:'WAIT',publishInvoked:false};},()=>START);
+  expect(calls).toContain('candidate:new');expect(calls).toContain('dispatch-build:new');expect(calls.some(value=>value.endsWith(':old'))).toBe(false);
+});
+
+
+it.each([{status:'WAIT',reason:'EDITING'}, {status:'WAIT',reason:'CONTENT_WAIT_AUTH'},
+  {status:'CONFLICT',reason:'HUMAN_EDIT_CONFLICT'}, {status:'READY',prNumber:9},
+  {status:'WAIT',reason:'UNCHANGED'}])('retains candidate result with already completed cycles: %j', async candidate => {
+  const source={repositoryId:1,cycleId:'pr-9-'+'b'.repeat(40),sourceSha:'b'.repeat(40),deliveryConfigSha:'c'.repeat(40),
+    units:[{id:'app',version:'1.0.0',tag:'v1.0.0',releaseId:7,authorId:42,manifestDigest:'d'.repeat(64),notesDigest:'e'.repeat(64),assets:[{path:'app.zip',size:12,sha256:'d'.repeat(64)}]}],requiredChannels:[]};
+  const {id,...unit}=source.units[0]!;
+  const observation={source:structuredClone(source),sourceComplete:true,observedAt:new Date(START).toISOString(),releasesComplete:true,channelsComplete:true,
+    releases:[{...unit,unitId:id,sourceSha:source.sourceSha,draft:false,immutable:true,evidenceDigest:'e'.repeat(64)}],
+    channels:[],consumptions:[],inFlightWaveKeys:[],unknownWriteKeys:[]};
+  const snapshot={repository:{activeCycleId:null,candidate:candidate.reason==='UNCHANGED'?null:{prNumber:9}},
+    cycles:[{value:{id:source.cycleId,completedEvidencePath:'evidence/completion/old.json',dispatches:[]}}],
+    domainRecords:[{path:'evidence/completion/old.json',value:{source,observation}}]};
+  const calls:string[]=[];
+  const result=await serviceReleaseWake({},async()=>snapshot,async(command:string)=>{calls.push(command);return candidate;});
+  expect(calls).toEqual(['candidate']);
+  expect(result).toEqual(candidate.reason==='UNCHANGED'?{status:'COMPLETE',reason:'REGISTERED_RELEASES_VERIFIED'}:candidate);
 });

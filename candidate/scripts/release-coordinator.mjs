@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-import { nativeReleaseApp, nativeEvidenceTransport, isolatedBuildEnvironment } from '../packages/runner/dist/index.js';
+import { nativeReleaseApp, nativeEvidenceTransport, isolatedBuildEnvironment, evaluateCompletion } from '../packages/runner/dist/index.js';
 import { readReleaseRecords, writeReleaseRecords, releaseCommand, assertReleaseWriterProtection } from './release-record.mjs';
 import {serviceMaintenance,maintenanceGitStore} from './maintenance.mjs';
 import {servicePages,pagesGitStore} from './pages-maintenance.mjs';
@@ -17,28 +17,40 @@ const safeCode=error=>error instanceof Error && /^RELEASE_[A-Z_]+$/.test(error.m
 const iso=clock=>new Date(clock()).toISOString();
 
 /** One wake has one fixed domain sequence. A publish invocation always ends this repository's wake. */
-export async function serviceReleaseWake(request,refresh,invoke) {
+export async function serviceReleaseWake(request,refresh,invoke,clock=Date.now) {
   let snapshot=await refresh();
   if(!snapshot.repository)return {status:'WAIT',reason:'RELEASE_BOOTSTRAP_REQUIRED'};
   const candidate=await invoke('candidate',{...request,cycleId:snapshot.repository.activeCycleId,runId:null});
   snapshot=await refresh();
-  if(!snapshot.repository.activeCycleId)return candidate;
-  request={...request,cycleId:snapshot.repository.activeCycleId,runId:null};
-  const build=await invoke('dispatch-build',request);
-  await refresh();
-  const publish=await invoke('publish',request);
-  if(publish.publishInvoked===true)return publish;
-  await refresh();const channel=await invoke('dispatch-channel',request);
-  await refresh();const observation=await invoke('observe-channel',request);
-  snapshot=await refresh();
-  const cycle=snapshot.cycles.find(value=>value.value.id===request.cycleId)?.value;
-  for(const dispatch of cycle?.dispatches??[])if(dispatch.canonicalRunId!==null) {
-    await refresh();await invoke('rerun',{...request,runId:dispatch.canonicalRunId});
+  const results=[];
+  for(const {value:registered} of snapshot.cycles) {
+    const read=snapshot.domainRecords?.filter(record=>record.path.startsWith('evidence/reads/')&&record.value.cycleId===registered.id)
+      .sort((a,b)=>b.value.observedAt.localeCompare(a.value.observedAt))[0]?.value;
+    if(read?.nextCheckAt&&Date.parse(read.nextCheckAt)>clock()) {
+      results.push({status:'WAIT',reason:'NATIVE_READ_BACKOFF',nextCheckAt:read.nextCheckAt});continue;
+    }
+    const latest=snapshot.domainRecords?.find(record=>record.path===registered.completedEvidencePath)?.value;
+    if(latest&&evaluateCompletion(latest.source,latest.observation,latest.observation.observedAt).distributionResult==='PASS'
+      &&evaluateCompletion(latest.source,latest.observation,latest.observation.observedAt).result==='PASS')continue;
+    request={...request,cycleId:registered.id,runId:null};
+    if(!registered.completedEvidencePath) {
+      results.push(await invoke('dispatch-build',request));await refresh();
+      const publish=await invoke('publish',request);results.push(publish);
+      if(publish.publishInvoked===true)return publish;
+    }
+    await refresh();results.push(await invoke('dispatch-channel',request));
+    await refresh();results.push(await invoke('observe-channel',request));
+    snapshot=await refresh();
+    const cycle=snapshot.cycles.find(value=>value.value.id===registered.id)?.value;
+    for(const dispatch of cycle?.dispatches??[])if(dispatch.canonicalRunId!==null) {
+      await refresh();results.push(await invoke('rerun',{...request,runId:dispatch.canonicalRunId}));
+    }
   }
-  const results=[build,publish,channel,observation];
+  if(!results.length)return snapshot.cycles.length && candidate.status==='WAIT' && candidate.reason==='UNCHANGED' && !snapshot.repository.candidate
+    ?{status:'COMPLETE',reason:'REGISTERED_RELEASES_VERIFIED'}:candidate;
   const nextCheckAt=results.map(value=>value.nextCheckAt??value.observation?.readObservation?.nextCheckAt).filter(Boolean).sort().at(-1)??null;
   if(results.some(value=>['UNKNOWN','CONFLICT','BLOCKED'].includes(value.status)))return {status:'UNKNOWN',reason:'NATIVE_EVIDENCE_REQUIRED',nextCheckAt};
-  return {status:'WAIT',reason:publish.reason??'RELEASE_RECONCILIATION_REQUIRED',nextCheckAt};
+  return {status:'WAIT',reason:'REGISTERED_CYCLES_OBSERVED',nextCheckAt};
 }
 
 /** Ports are fixed I/O boundaries, never persisted tasks, action tables or callback names. */
@@ -54,7 +66,7 @@ export async function coordinateReleaseWake({discover,observe,service,health,mai
     for(const repository of repositories) {
       if(clock()>=deadline){scanComplete=false;errors.add('CLAIM_WINDOW_CLOSED');break;}
       if(repository.archived||repository.disabled)continue;
-      // Pages remains independent of release bootstrap, channel waits and product cycle budgets.
+      // Pages remains independent of release bootstrap, channel waits and product release progress.
       if(pages)try {
         const result=await pages(repository);
         if(['UNKNOWN','EXHAUSTED','EXPIRED'].includes(result.status)){scanComplete=false;errors.add('PAGES_EVIDENCE_REQUIRED');}
@@ -78,7 +90,7 @@ export async function coordinateReleaseWake({discover,observe,service,health,mai
   await health(summary);return summary;
 }
 
-export async function fetchState(root,repository,token,targetRef='steward/release-state',{governanceAppId,fetcher=fetch}={}) {
+export async function fetchState(root,repository,token,targetRef='steward/release-state',{governanceAppId,fetcher=fetch,includeHistory=targetRef!=='steward/release-state'}={}) {
   const io=nativeEvidenceTransport(token,fetcher),remote=`https://github.com/${repository.full_name}.git`;
   if(targetRef==='steward/governance-state')await assertQualityProtection(qualityNativeIO(repository.full_name,token,fetcher),repository.full_name,governanceAppId);
   else await assertReleaseWriterProtection(repository.full_name,targetRef,io,{token,fetcher});
@@ -105,7 +117,7 @@ export async function fetchState(root,repository,token,targetRef='steward/releas
       await git('update-ref','refs/heads/steward/governance-state',actual);
     }
   }
-  const snapshot=await readReleaseRecords({directory,targetRef,repositoryId:repository.id});
+  const snapshot=await readReleaseRecords({directory,targetRef,repositoryId:repository.id,includeHistory});
   const lastServedAt=(await git('show','-s','--format=%cI',head)).toString().trim();
   const readBytes=async path=>git('show',`${head}:${path}`);
   return {directory,remote,io,snapshot,lastServedAt,readBytes};
@@ -122,7 +134,7 @@ export async function main() {
       maintenance:()=>app.forRepository(1296724484,async token=>{
         const repository={id:1296724484,full_name:'splrad/steward',default_branch:process.env.STEWARD_DEFAULT_BRANCH};
         const writeDirectory=await mkdtemp(join(root,'maintenance-writes-'));
-        const store=maintenanceGitStore({refresh:()=>fetchState(root,repository,token),writeDirectory,defaultBranch:repository.default_branch,token,identity});
+        const store=maintenanceGitStore({refresh:()=>fetchState(root,repository,token,'steward/release-state',{includeHistory:true}),writeDirectory,defaultBranch:repository.default_branch,token,identity});
         return serviceMaintenance({io:nativeEvidenceTransport(token),store,defaultBranch:repository.default_branch,
           coordinator:{runId:Number(process.env.GITHUB_RUN_ID),runAttempt:Number(process.env.GITHUB_RUN_ATTEMPT),controllerSha}});
       }),discover:()=>app.discover(),
@@ -136,7 +148,8 @@ export async function main() {
       }),
       observe:repository=>app.forRepository(repository.id,async token=>{
         const state=await fetchState(root,repository,token);
-        return {lastServedAt:state.lastServedAt,nextCheckAt:state.snapshot.repository?.nextCheckAt??null};
+        // Per-operation read receipts retain backoff; an old channel wait must not suppress candidate preparation.
+        return {lastServedAt:state.lastServedAt,nextCheckAt:null};
       }),
       service:repository=>app.forRepository(repository.id,async token=>{
         const writeDirectory=await mkdtemp(join(root,'writes-'));let state;

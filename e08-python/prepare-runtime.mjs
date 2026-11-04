@@ -43,6 +43,8 @@ export async function prepareRuntime(root,output) {
       text="import {fixedContentSdk} from '../e08-python/fixed-content-sdk.mjs';\n"+text;
       replace("const sdk = language ?? copilotReleaseClient(controllerDirectory, copilotToken ?? '');","const sdk = language ?? fixedContentSdk();");
       replace("resolve(controllerDirectory, 'scripts/release-please-candidate.mjs')",JSON.stringify(join(output,'scripts/release-please-candidate.mjs')));
+      replace("'splrad/steward'", "'splrad/steward-e08-controller'", 2);
+      replace('^splrad\\/steward\\/', '^splrad\\/steward-e08-controller\\/');
     }
     await writeFile(join(output,'scripts',entry.name),text,{flag:'wx'});
     records.push({file:'scripts/'+entry.name,sourceSha256:hash(original),runtimeSha256:hash(text),replacements});

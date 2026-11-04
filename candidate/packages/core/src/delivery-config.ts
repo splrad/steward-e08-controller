@@ -56,12 +56,19 @@ export function deliveryAssetNames(unit: DeliveryUnit, version: string, packageV
 }
 /** Finite delivery facts at S. Commands, build recipes and publication policy are not data fields. */
 export function parseDeliveryConfig(input: unknown): DeliveryConfig {
+  if (input && typeof input === 'object' && !Array.isArray(input) && (input as { schemaVersion?: unknown }).schemaVersion === 1) {
+    const authors = (input as { repositoryAuthors?: unknown }).repositoryAuthors;
+    if (!Array.isArray(authors) || !authors.length || authors.some(author => author && typeof author === 'object'
+      && (typeof author.evidence !== 'string' || !author.evidence.trim()))) throw new Error('AUTHOR_IDENTITY_UNVERIFIED');
+  }
   if (!validateDelivery(input)) throw new Error('DELIVERY_CONFIG_STRUCTURE');
   const value = structuredClone(input) as unknown as DeliveryConfig;
   const unique = (values: unknown[]) => new Set(values).size === values.length;
   if (!unique(value.units.map(unit => unit.id)) || !unique(value.units.map(unit => unit.path.toLowerCase()))
     || !unique(value.repositoryAuthors.map(author => author.id)) || value.repositoryAuthors.some(author => !author.evidence.trim()))
     throw new Error('DELIVERY_DUPLICATE_IDENTITY');
+  const paths=value.units.map(unit=>unit.path.toLowerCase());
+  if(paths.some((path,i)=>paths.some((other,j)=>i!==j&&(path==='.'||other.startsWith(path+'/')))))throw new Error('DELIVERY_NESTED_UNIT_PATH');
   for (const unit of value.units) {
     assertDeliveryPath(unit.path, { root: true }); assertDeliveryPath(unit.notesPath);
     if ([unit.path, unit.notesPath].some(path => path.split('/').some(part => part.toLowerCase() === '.git')))

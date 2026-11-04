@@ -298,7 +298,7 @@ export async function inspectNativeReleaseRecords(repository: string, gh: GhComm
       completion:{result:'UNKNOWN',reason:'NATIVE_EFFECT_RECONCILIATION_REQUIRED'}};
   } catch (error) {
     // Absence, 403, rate limits and unsupported/corrupt records cannot imply IDLE
-    // or an empty budget. Native/history recovery is a separate E03 connection.
+    // or a successful observation. Native history recovery remains an explicit operation.
     return {repository,records,completion:{result:'UNKNOWN',reason:error instanceof Error && /^RELEASE_(?:INSPECT|OBSERVATION):/.test(error.message)
       ?error.message:'NATIVE_STATE_READ_UNAVAILABLE'}};
   }

@@ -2,7 +2,6 @@ import { expect, it } from 'vitest';
 import { evidenceFixture, NOW } from './native-evidence-fixture.js';
 import { productBusinessResults } from '../src/release-run.js';
 import { nativeRunFact, jobFact, inspectNativeCycle } from '../src/native-release-evidence.js';
-import { deriveFailureBudget } from '../../core/src/release-observation.js';
 it.each(['success', 'failure', 'cancelled', 'skipped'])('binds %s receipt to the actual native business step', conclusion => {
   const f = evidenceFixture(); f.jobs.get(1)![0].steps[0].conclusion = conclusion;
   const results = productBusinessResults(f.context, f.request, nativeRunFact(f.runs.get(1)), jobFact(f.jobs.get(1)![0]), 'app', NOW);
@@ -17,18 +16,18 @@ it('a completed read guard returning UNKNOWN is zero business, with the native f
   expect(results[0]!.execution).toMatchObject({ businessStartedProven: false, outcome: 'REJECTED_BEFORE_BUSINESS' });
   expect(f.jobs.get(1)![0].steps[0].conclusion).toBe('failure');
 });
-it.each(['human', 'duplicate', 'job-source', 'attempt', 'unit'])('rejects %s result source', kind => {
+it.each(['actor', 'duplicate', 'job-source', 'attempt', 'unit'])('rejects %s result source', kind => {
   const f = evidenceFixture();
-  if (kind === 'human') f.runs.get(1).triggering_actor.id = 7;
+  if (kind === 'actor') f.runs.get(1).actor.id = 7;
   if (kind === 'duplicate') f.request.canonicalRunId = 101;
   if (kind === 'job-source') f.jobs.get(1)![0].head_sha = 'c'.repeat(40);
   if (kind === 'attempt') f.jobs.get(1)![0].run_attempt = 2;
   expect(() => productBusinessResults(f.context, f.request, nativeRunFact(f.runs.get(1)), jobFact(f.jobs.get(1)![0]), kind === 'unit' ? 'missing' : 'app', NOW)).toThrow();
 });
-it('post-step native receipts round-trip through original log evidence and the failure budget', async () => {
+it('post-step native receipts round-trip through original log evidence without a failure budget', async () => {
   const f = evidenceFixture(2);
   for (const [attempt, raw] of f.runs) f.results.set(attempt, productBusinessResults(f.context, f.request, nativeRunFact(raw), jobFact(f.jobs.get(attempt)![0]), 'app', NOW)[0]!);
   const observed = await inspectNativeCycle(f.context, [], f.io, NOW);
-  const budget = await deriveFailureBudget(observed.native, observed.archived, { repositoryId: 1, cycleId: f.context.cycle.id, sourceSha: f.context.cycle.sourceSha, expectedRunIds: [100], currentWave: null });
-  expect(budget.remaining).toBe(1); expect(budget.unknownEvidence).toEqual([]); expect(budget.conflictEvidence).toEqual([]);
+  expect(observed.currentFacts).toMatchObject({unknownEvidence:[],conflictEvidence:[],inFlightWaveKeys:[]});
+  expect(observed.native.attempts).toHaveLength(2);
 });

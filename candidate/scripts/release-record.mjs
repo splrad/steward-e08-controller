@@ -9,7 +9,7 @@ import { Octokit } from '@octokit/rest';
 import { completeNativeRuleParameters } from './native-rule-parameters.mjs';
 import { decodeReleaseRecord, decodeStateFile, stateRecordOwner, assertRepositoryWrite, isolatedBuildEnvironment, decodeBuildJson, assertMaintenanceProgress, assertPagesProgress,
   inspectNativeCycle, recoverNativeCycle, archiveFile, nativeReadFile, nativeEvidenceTransport,
-  dispatchNativeRun, prepareBuildDispatch, prepareContinuation, verifyDispatchWorkflow, inspectPublications, invokePublication, inspectCycleHistory, completionFile, decodeCompletionArchive,
+  dispatchNativeRun, prepareBuildDispatch, verifyDispatchWorkflow, inspectPublications, invokePublication, inspectCycleHistory, completionFile, decodeCompletionArchive,
   pipelinePreparePublication, readCycleDelivery, prepareNormalizedDelivery, NativeGitHubRelease, nativeGhCommand, nativeReleaseDownload, NativeEvidenceReader, nativeRunFact,
   retainedChannelObservations, observeNativeChannels, readChannelSourceRejections, selectChannelDispatch, prepareChannelDispatch, channelTargetsDigest, verifyChannelProbe, verifyChannelResult, verifyContinuationReleases, evaluateCompletion } from '../packages/runner/dist/index.js';
 
@@ -19,7 +19,7 @@ const refs = new Set(['steward/release-state','steward/governance-state','stewar
 const hash = value => typeof value==='string' && /^[a-f0-9]{40}$/.test(value) && value.length===40;
 const ordered = values => [...values].sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
 function compatibleCycle(a,b) {
-  if (a.sourceSha!==b.sourceSha || a.controllerSha!==b.controllerSha || a.deliveryConfigSha!==b.deliveryConfigSha
+  if (a.sourceSha!==b.sourceSha || a.controllerSha!==b.controllerSha || a.deliveryConfigSha!==b.deliveryConfigSha || a.repairOf!==b.repairOf
     || JSON.stringify(ordered(a.requiredChannels.map(x=>[x.unitId,x.channelId])))!==JSON.stringify(ordered(b.requiredChannels.map(x=>[x.unitId,x.channelId])))
     || JSON.stringify(ordered(a.units.map(x=>[x.id,x.version,x.tag])))!==JSON.stringify(ordered(b.units.map(x=>[x.id,x.version,x.tag])))) return false;
   for (const unit of a.units) {
@@ -31,13 +31,19 @@ function compatibleCycle(a,b) {
   return true;
 }
 /** Read immutable Git blobs without checkout, hooks, external diff or textconv. */
-export async function readReleaseRecords({ directory, targetRef, repositoryId }) {
+export async function readReleaseRecords({ directory, targetRef, repositoryId, includeHistory=true }) {
   if (!refs.has(targetRef) || !Number.isSafeInteger(repositoryId) || repositoryId<1) throw new Error('RELEASE_RECORD: target');
   const home=await mkdtemp(join(tmpdir(),'steward-record-read-'));
   const env=isolatedBuildEnvironment(process.env,home);
   // These plumbing reads never apply attributes, filters or text conversion.
   const git=async (...args)=>(await promisify(execFile)('git',['--no-replace-objects','--no-optional-locks','-c','core.hooksPath=','-c','core.fsmonitor=false',...args],
     {cwd:resolve(directory),env,encoding:'buffer',maxBuffer:16*1024*1024,timeout:30_000,windowsHide:true})).stdout;
+  const batch=async(args,input)=>new Promise((done,reject)=>{
+    const child=execFile('git',['--no-replace-objects','--no-optional-locks','-c','core.hooksPath=','-c','core.fsmonitor=false',...args],
+      {cwd:resolve(directory),env,encoding:'buffer',maxBuffer:17*1024*1024,timeout:30_000,windowsHide:true},
+      (error,stdout)=>error?reject(error):done(stdout));
+    child.stdin.on('error',reject);child.stdin.end(input);
+  });
   // Git object IDs identify immutable bytes. Reuse the bytes within this read;
   // still decode and validate every path and historical transition below.
   const blobs=new Map();
@@ -50,12 +56,61 @@ export async function readReleaseRecords({ directory, targetRef, repositoryId })
     if((await git('rev-parse','--is-shallow-repository')).toString().trim()!=='false')throw new Error('RELEASE_RECORD: incomplete history');
     const head=(await git('rev-parse','--verify',`${ref}^{commit}`)).toString().trim();
     if (!hash(head)) throw new Error('RELEASE_RECORD: head');
-    const commits=(await git('rev-list',head)).toString().trim().split('\n');
-    const commitTimes=new Map((await git('log','--format=%H %cI',head)).toString().trim().split('\n').map(line=>line.split(' ')));
-    const history=[], repositoryHistory=[], currentPaths=[], cycles=new Map(), domainRecords=new Map(), candidateBlobs=new Map(); let repository=null, repositoryCommit=null, adoption=null;
+    const commits=includeHistory?(await git('rev-list',head)).toString().trim().split('\n'):[head];
+    const commitTimes=new Map((await git('log',...(includeHistory?[]:['-1']),'--format=%H %cI',head)).toString().trim().split('\n').map(line=>line.split(' ')));
+    // Read each immutable object once in bounded batches. A long protected
+    // history must not start one Windows process for every archived blob.
+    // Decoding, path ownership and historical transitions remain per record.
+    const entriesByCommit=new Map(),objects=new Set();
+    for(const commit of commits) {
+      if(!hash(commit))throw new Error('RELEASE_RECORD: history');
+      const entries=(await git('ls-tree','-r','-z',commit)).toString('utf8').split('\0').filter(Boolean);
+      entriesByCommit.set(commit,entries);
+      for(const entry of entries) {
+        const match=/^(\d+) (\w+) ([a-f0-9]{40})\t(.+)$/.exec(entry);
+        if(!match)throw new Error('RELEASE_RECORD: tree');
+        const [,mode,type,oid,path]=match;
+        if(targetRef!=='steward/release-state'||path==='state.json'||/^(cycles|generated|content|maintenance)\//.test(path)
+          ||/^evidence\/(native|reads|dispatch|retry-limit|publication|completion|channel|channel-read|normalized-delivery|source-rejection)\//.test(path)) {
+          if(mode!=='100644'||type!=='blob') {
+            const kind=targetRef!=='steward/release-state'||path==='state.json'||path.startsWith('cycles/')?'':
+              path.startsWith('maintenance/')?'maintenance ':/^(generated|content)\//.test(path)?'candidate ':'archive ';
+            throw new Error(`RELEASE_RECORD: unsafe ${kind}path`);
+          }
+          objects.add(oid);
+        }
+      }
+    }
+    const ids=[...objects];
+    if(ids.length) {
+      const sizes=(await batch(['cat-file','--batch-check=%(objectname) %(objecttype) %(objectsize)'],ids.join('\n')+'\n')).toString('ascii').trim().split('\n');
+      if(sizes.length!==ids.length)throw new Error('RELEASE_RECORD: batch coverage');
+      const groups=[];let group=[],size=0;
+      for(let i=0;i<ids.length;i++) {
+        const match=/^([a-f0-9]{40}) blob (0|[1-9][0-9]*)$/.exec(sizes[i]);
+        const length=Number(match?.[2]);
+        if(!match||match[1]!==ids[i]||!Number.isSafeInteger(length)||length>16*1024*1024)throw new Error('RELEASE_RECORD: batch object');
+        if(group.length&&size+length+64>16*1024*1024){groups.push(group);group=[];size=0;}
+        group.push({oid:ids[i],length});size+=length+64;
+      }
+      if(group.length)groups.push(group);
+      for(const group of groups) {
+        const bytes=await batch(['cat-file','--batch'],group.map(value=>value.oid).join('\n')+'\n');let offset=0;
+        for(const {oid,length} of group) {
+          const end=bytes.indexOf(10,offset);
+          if(end<offset||bytes.subarray(offset,end).toString('ascii')!==`${oid} blob ${length}`
+            ||end+1+length>=bytes.length||bytes[end+1+length]!==10)throw new Error('RELEASE_RECORD: batch framing');
+          const content=Buffer.from(bytes.subarray(end+1,end+1+length));
+          if(createHash('sha1').update(`blob ${length}\0`).update(content).digest('hex')!==oid)throw new Error('RELEASE_RECORD: batch object digest');
+          blobs.set(oid,content);offset=end+length+2;
+        }
+        if(offset!==bytes.length)throw new Error('RELEASE_RECORD: batch trailing bytes');
+      }
+    }
+    const history=[], repositoryHistory=[], cycleHistory=[], currentPaths=[], cycles=new Map(), domainRecords=new Map(), candidateBlobs=new Map(); let repository=null, repositoryCommit=null, adoption=null;
     for (const commit of commits) {
       if (!hash(commit)) throw new Error('RELEASE_RECORD: history');
-      const entries=(await git('ls-tree','-r','-z',commit)).toString('utf8').split('\0').filter(Boolean);
+      const entries=entriesByCommit.get(commit);
       for (const entry of entries) {
         const match=/^(\d+) (\w+) ([a-f0-9]{40})\t(.+)$/.exec(entry);
         if(!match)throw new Error('RELEASE_RECORD: tree');
@@ -122,6 +177,7 @@ export async function readReleaseRecords({ directory, targetRef, repositoryId })
             const prior=cycles.get(value.id);
             if(prior)cycleProgress(value,prior.value);
             if(!prior)cycles.set(value.id,{commit,blobSha:oid,value});
+            cycleHistory.push({commit,blobSha:oid,value,committedAt:commitTimes.get(commit)});
           }
           history.push({commit,path,blobSha:oid,status:'DECODED'});
         } catch(error) {
@@ -132,7 +188,14 @@ export async function readReleaseRecords({ directory, targetRef, repositoryId })
     }
     const current=(await git('rev-parse','--verify',`${ref}^{commit}`)).toString().trim();
     if(current!==head)throw new Error('RELEASE_RECORD: ref moved');
-    return {repositoryId,targetRef,head,repository,repositoryCommit,cycles:[...cycles.values()],domainRecords:[...domainRecords.values()],history,repositoryHistory,currentPaths,
+    // Missing registered records are the bounded recovery trigger; healthy wakes read one tree.
+    if(!includeHistory && targetRef==='steward/release-state' && (!repository
+      || history.some(record=>record.status!=='DECODED')
+      || [repository.activeCycleId,repository.lastCompletedCycleId].some(id=>id&&!cycles.has(id))
+      || [...cycles.values()].some(({value})=>value.completedEvidencePath&&(!domainRecords.has(value.completedEvidencePath)
+        || domainRecords.get(value.completedEvidencePath).value.provenance.some(proof=>!domainRecords.has(proof.path))))))
+      return readReleaseRecords({directory,targetRef,repositoryId,includeHistory:true});
+    return {repositoryId,targetRef,head,repository,repositoryCommit,cycles:[...cycles.values()],cycleHistory,domainRecords:[...domainRecords.values()],history,repositoryHistory,currentPaths,
       completion:{result:'UNKNOWN',reason:'NATIVE_RECONCILIATION_REQUIRED'}};
   } finally { await rm(home,{recursive:true,force:true}); }
 }
@@ -192,6 +255,11 @@ function gitConfig(request) {
 }
 function cycleProgress(before,after) {
   if(!compatibleCycle(before,after))fail('immutable cycle conflict');
+  const oldDecision=before.approvedRepairDecision,newDecision=after.approvedRepairDecision;
+  if(oldDecision && JSON.stringify(oldDecision)!==JSON.stringify(newDecision)) {
+    if(oldDecision.cycleId===before.id || !newDecision || newDecision.cycleId!==after.id
+      || Date.parse(newDecision.createdAt)<Date.parse(oldDecision.createdAt))fail('repair decision changed');
+  }
   for(const old of before.units) {
     const current=after.units.find(unit=>unit.id===old.id);
     if(['releaseId','notesDigest','manifestDigest'].some(key=>old[key]!==null && old[key]!==current[key])
@@ -360,7 +428,7 @@ export async function writeReleaseRecords(input,{token}={}) {
       if(head!==null) {
         await required('update-ref',ref,head);
         if(request.targetRef==='steward/release-state'||request.targetRef==='steward/governance-state') {
-          const history=await readReleaseRecords({directory,targetRef:request.targetRef,repositoryId:request.repositoryId});
+          const history=await readReleaseRecords({directory,targetRef:request.targetRef,repositoryId:request.repositoryId,includeHistory:request.writer!=='release'});
           if(request.targetRef==='steward/release-state') {
             const update=request.changes.find(file=>file.path==='state.json');
             const record=update?decodeReleaseRecord('repository',Buffer.from(update.content)):current.get('state.json')?.value;
@@ -436,11 +504,16 @@ export async function inspectReleaseEvidence(request,{token,io=nativeEvidenceTra
     || request.runId!==null && (!Number.isSafeInteger(request.runId)||request.runId<1))fail('evidence input');
   if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(request.repository)||request.repository.split('/').some(part=>part==='.'||part==='..'))fail('evidence repository');
   if(request.remote!==`https://github.com/${request.repository}.git` && !isAbsolute(request.remote))fail('evidence remote');
-  let snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId});
-  assertRepositoryWrite(snapshot.repository);
-  const recovered=await recoverReleaseCaches(request,snapshot,{token,io,centralIo,now});snapshot=recovered.snapshot;request={...request,directory:recovered.directory};
+  let snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId,includeHistory:false});
+  const recovered=await recoverReleaseCaches(request,snapshot,{token,io,centralIo,now});snapshot=recovered.snapshot;request={...request,directory:recovered.directory};assertRepositoryWrite(snapshot.repository);
   const cycle=snapshot.cycles.find(record=>record.value.id===request.cycleId)?.value;
   if(!cycle || snapshot.repository?.defaultBranch!==request.defaultBranch)fail('evidence cycle');
+  if(cycle.dispatches.some(dispatch=>dispatch.canonicalRunId!==null&&!snapshot.domainRecords.some(record=>
+    record.path.startsWith('evidence/native/')&&record.value.run.id===dispatch.canonicalRunId))) {
+    const original=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId,includeHistory:true});
+    if(original.head!==snapshot.head)fail('state snapshot must match native ref');snapshot=original;
+  }
+
   const response=await io.request('GET',`/repos/${request.repository}/git/ref/heads/steward/release-state`);
   if(response.status!==200 || JSON.parse(Buffer.from(response.bytes).toString('utf8')).object?.sha!==snapshot.head)fail('state snapshot must match native ref');
   const context={repository:request.repository,repositoryId:request.repositoryId,appBotId:request.appBotId,cycle};
@@ -458,7 +531,7 @@ export async function inspectReleaseEvidence(request,{token,io=nativeEvidenceTra
       targetRef:'steward/release-state',writer:'release',expectedHead:snapshot.head,allowedPaths:files.map(file=>file.path),
       changes:files.map(file=>({...file,previousSha256:snapshot.currentPaths.includes(file.path)?file.sha256:null})),identity:request.identity},{token});
     if(!['APPLIED','UNCHANGED'].includes(written.status))return {...written,records:[]};
-    const readback=await readReleaseRecords({directory,targetRef:'steward/release-state',repositoryId:request.repositoryId});
+    const readback=await readReleaseRecords({directory,targetRef:'steward/release-state',repositoryId:request.repositoryId,includeHistory:false});
     if(readback.head!==written.head || JSON.stringify(readback.cycles.find(record=>record.value.id===cycle.id)?.value)!==JSON.stringify(cycle))
       return {status:'CONFLICT',head:readback.head,records:[]};
     const nativeRef=await io.request('GET',`/repos/${request.repository}/git/ref/heads/steward/release-state`);
@@ -477,9 +550,12 @@ export async function inspectReleaseEvidence(request,{token,io=nativeEvidenceTra
   if(publisher&&centralIo&&centralInvocation) {
     const observation=await inspectNativeCycle(context,history,io,observedAt,readHistory);
     const saved=await store.archive([...observation.archives.map(archiveFile),nativeReadFile(observation.readObservation)]);
-    if(!['APPLIED','UNCHANGED'].includes(saved.status)||observation.budget.remaining===null)return {status:'UNKNOWN',reason:'PUBLICATION_BUDGET_UNKNOWN',publishInvoked:false};
-    if(observation.budget.inFlightWaveKeys.length)return {status:'WAIT',reason:'RUN_IN_FLIGHT',publishInvoked:false};
-    if(observation.budget.remaining===0)return {status:'BLOCKED',reason:'FAILURE_BUDGET_EXHAUSTED',publishInvoked:false};
+    if(!['APPLIED','UNCHANGED'].includes(saved.status)||observation.currentFacts.unknownEvidence.length||observation.currentFacts.conflictEvidence.length)return {status:'UNKNOWN',reason:'PUBLICATION_EVIDENCE_UNKNOWN',publishInvoked:false};
+    if(observation.currentFacts.inFlightWaveKeys.length)return {status:'WAIT',reason:'RUN_IN_FLIGHT',publishInvoked:false};
+    const attempts=[...publication.native.attempts,...(publication.archived??[]).map(item=>item.attempt)];
+    if(attempts.some(item=>item.runId!==centralInvocation.runId&&item.invocations.some(inv=>inv.evidence.outcome==='BUSINESS_FAILED')))
+      return {status:'BLOCKED',reason:'NATIVE_MAINTENANCE_REQUIRED',publishInvoked:false};
+
     return invokePublication(context,centralInvocation,publications,store,io,centralIo,()=>publisher(context,async next=>{
       const adopted=await adoptReleaseCycle(request,snapshot,next,{token,io});
       snapshot=adopted.snapshot;request.directory=adopted.directory;Object.assign(cycle,next);
@@ -507,7 +583,7 @@ async function adoptReleaseCycle(request,snapshot,cycle,{token,io},extraFiles=[]
     targetRef:'steward/release-state',writer:'release',expectedHead:snapshot.head,allowedPaths:[path,...files.map(file=>file.path)],
     changes:[{path,content,sha256:sha256(content),previousSha256:sha256(previous)},...files.map(file=>({...file,previousSha256:snapshot.currentPaths.includes(file.path)?file.sha256:null}))],identity:request.identity},{token});
   if(!['APPLIED','UNCHANGED'].includes(written.status))fail('cycle write unconfirmed');
-  const next=await readReleaseRecords({directory,targetRef:'steward/release-state',repositoryId:request.repositoryId});
+  const next=await readReleaseRecords({directory,targetRef:'steward/release-state',repositoryId:request.repositoryId,includeHistory:false});
   const ref=await io.request('GET',`/repos/${request.repository}/git/ref/heads/steward/release-state`);
   if(next.head!==written.head||ref.status!==200||JSON.parse(Buffer.from(ref.bytes).toString('utf8')).object?.sha!==next.head
     ||JSON.stringify(next.cycles.find(record=>record.value.id===cycle.id)?.value)!==JSON.stringify(cycle))fail('cycle binding readback');
@@ -540,14 +616,14 @@ export async function publishNativeCycle(request,{token,io=nativeEvidenceTranspo
   if(!token||!centralIo||!centralInvocation||!isAbsolute(controllerDirectory))fail('central publisher identity');
   const root=await mkdtemp(join(tmpdir(),'steward-publication-'));
   try {
-    let snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId});
-  assertRepositoryWrite(snapshot.repository);
-  const recovered=await recoverReleaseCaches(request,snapshot,{token,io,centralIo,now});snapshot=recovered.snapshot;request={...request,directory:recovered.directory};
+    let snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId,includeHistory:false});
+  const recovered=await recoverReleaseCaches(request,snapshot,{token,io,centralIo,now});snapshot=recovered.snapshot;request={...request,directory:recovered.directory};assertRepositoryWrite(snapshot.repository);
     const cycle=structuredClone(snapshot.cycles.find(record=>record.value.id===request.cycleId)?.value);
-    if(!cycle||snapshot.repository.activeCycleId!==cycle.id)fail('active publication cycle');
+    if(!cycle)fail('registered publication cycle required');
     const context={repository:request.repository,repositoryId:request.repositoryId,appBotId:request.appBotId,cycle};
     const normalized=await ensureCycleDelivery(request,snapshot,cycle,{token,io,centralIo,now});snapshot=normalized.snapshot;request={...request,directory:normalized.directory};
     const records=await pipelinePreparePublication(context,root,controllerDirectory,token,undefined,io,undefined,undefined,snapshot.domainRecords);
+    if(!Array.isArray(records))return records;
     const adapter=new NativeGitHubRelease(args=>nativeGhCommand(args,token),nativeReleaseDownload(token));
     for(const item of records) {
       const unit=cycle.units.find(value=>value.id===item.unitId),names=adapter.names({manifest:item.manifest,directory:item.directory,releaseId:unit.releaseId,appBotId:request.appBotId});
@@ -615,11 +691,13 @@ export async function assertReleaseWriterProtection(repository,branch,io,{token,
 }
 
 /** Fixed Git/native history reader. E05/E06 supply fresh source/channel observations through one trusted I/O boundary. */
-export async function inspectRepositoryHistory(request,{token,io=nativeEvidenceTransport(token),completionReader,now=()=>new Date().toISOString()}={}) {
-  let snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId});
+export async function inspectRepositoryHistory(request,{token,io=nativeEvidenceTransport(token),completionReader,now=()=>new Date().toISOString(),handoff,centralIo}={}) {
+  let snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId,includeHistory:true});
   const native=async path=>{const response=await io.request('GET',`/repos/${request.repository}${path?'/'+path:''}`);if(response.status!==200)fail('history native read');return JSON.parse(Buffer.from(response.bytes).toString('utf8'));};
   if(snapshot.repository?.schemaVersion!==3)return {result:'UNKNOWN',inventoryComplete:false,reason:'RELEASE_ADOPTION_REQUIRED'};
-  const recovered=await recoverReleaseCaches(request,snapshot,{token,io,now});snapshot=recovered.snapshot;request={...request,directory:recovered.directory};
+  if(handoff&&snapshot.repository.candidate?.prNumber!==handoff.prNumber)
+    return {result:'UNKNOWN',inventoryComplete:false,reason:'HANDOFF_CANDIDATE_CHANGED'};
+  const recovered=await recoverReleaseCaches(request,snapshot,{token,io,now});snapshot=recovered.snapshot;request={...request,directory:recovered.directory};assertRepositoryWrite(snapshot.repository);
   return withReleaseAdoption(request,snapshot.repository.releaseAdoption,io,async({defaultHead,reachable,verifySource})=>{
   const freshFiles=[];
   const fresh=completionReader?async cycle=>{
@@ -652,9 +730,13 @@ export async function inspectRepositoryHistory(request,{token,io=nativeEvidenceT
       return {cycles,completions};
     }finally{await rm(profile,{recursive:true,force:true});}
   };
-  const history=await inspectCycleHistory({...snapshot,repository:request.repository,defaultBranch:request.defaultBranch,appBotId:request.appBotId,
-    defaultHead,releaseAdoption:snapshot.repository.releaseAdoption,reachable},io,now(),fresh,originalState,verifySource);
+  const historySnapshot={...snapshot,repository:request.repository,defaultBranch:request.defaultBranch,appBotId:request.appBotId,
+    defaultHead,releaseAdoption:snapshot.repository.releaseAdoption,reachable};
+  const history=await inspectCycleHistory(historySnapshot,io,now(),fresh,originalState,verifySource,handoff);
   if(history.result!=='PASS'||!history.inventoryComplete)return history;
+  // The adapter writes the complete cycle and merged-candidate archive together.
+  // Do not retire the candidate or mutate the state between proof and handoff.
+  if(handoff)return history;
   const files=[...freshFiles],changes=[];
   for(const file of files)changes.push({...file,previousSha256:snapshot.currentPaths.includes(file.path)?file.sha256:null});
   for(const {value:cycle} of snapshot.cycles) {
@@ -667,7 +749,11 @@ export async function inspectRepositoryHistory(request,{token,io=nativeEvidenceT
     const raw=await native(`git/blobs/${prior.blobSha}`);const bytes=Buffer.from(raw.content,'base64');
     changes.push({path:`cycles/${cycle.id}.json`,content,sha256:sha256(content),previousSha256:sha256(bytes)});
   }
-  const next={...snapshot.repository,revision:snapshot.repository.revision+1,activeCycleId:null,candidate:null,lastCompletedCycleId:history.lastCompletedCycleId,
+  // Completion retires the candidate belonging to a proved merged cycle. An
+  // already opened next candidate is not a completed obligation or a cache to clear.
+  const completedCandidate=history.discovered.some(fact=>fact.prNumber===snapshot.repository.candidate?.prNumber);
+  const next={...snapshot.repository,revision:snapshot.repository.revision+1,activeCycleId:null,
+    candidate:completedCandidate?null:snapshot.repository.candidate,lastCompletedCycleId:history.lastCompletedCycleId,
     lastObservedDefaultSha:defaultHead,lastProgressAt:now(),lastErrorCode:null};
   const prior=snapshot.history.find(record=>record.path==='state.json'&&record.status==='DECODED');
   const raw=await native(`git/blobs/${prior.blobSha}`),content=JSON.stringify(next,null,2)+'\n';
@@ -685,33 +771,54 @@ export async function inspectRepositoryHistory(request,{token,io=nativeEvidenceT
 }
 
 /** Fixed release entry points share the protected Git snapshot and canonical Run binding. */
-export async function releaseCommand(command,request,{token,io=nativeEvidenceTransport(token),now=()=>new Date().toISOString(),centralIo,centralInvocation,publisher,completionReader,candidateReadToken,copilotToken,controllerSha,controllerDirectory}={}) {
+export async function releaseCommand(command,request,{token,io=nativeEvidenceTransport(token),now=()=>new Date().toISOString(),centralIo,centralInvocation,publisher,completionReader,candidateReadToken,copilotToken,controllerSha,controllerDirectory,candidateRuntime}={}) {
   if(!['candidate','dispatch-build','publish','dispatch-channel','observe-channel','rerun'].includes(command))fail('release command');
   exact(request,['directory','writeDirectory','remote','repository','repositoryId','defaultBranch','appBotId','cycleId','runId','identity']);
   if(!isAbsolute(request.directory)||!isAbsolute(request.writeDirectory)||!Number.isSafeInteger(request.appBotId)||request.appBotId<1
     || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(request.repository)||request.repository.split('/').some(part=>part==='.'||part==='..')
     || request.remote!==`https://github.com/${request.repository}.git` && !isAbsolute(request.remote))fail('release input');
-  if(command==='rerun')return inspectReleaseEvidence(request,{token,io,centralIo});
+  if(command==='rerun')return inspectReleaseEvidence(request,{token,io,centralIo,now});
   if(command==='observe-channel') {
     if(!controllerDirectory||!centralIo)return {status:'WAIT',reason:'CHANNEL_OBSERVATION_CONTEXT_REQUIRED'};
     return observeReleaseChannels(request,{token,io,centralIo,controllerDirectory,now});
   }
   if(request.runId!==null)fail('release command cannot select Run');
-  let snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId}),directory=request.directory;
-  assertRepositoryWrite(snapshot.repository);
-  const recovered=await recoverReleaseCaches(request,snapshot,{token,io,centralIo,now});snapshot=recovered.snapshot;directory=recovered.directory;request={...request,directory};
+  let snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId,includeHistory:false}),directory=request.directory;
+  const recovered=await recoverReleaseCaches(request,snapshot,{token,io,centralIo,now});snapshot=recovered.snapshot;directory=recovered.directory;request={...request,directory};assertRepositoryWrite(snapshot.repository);
   if(snapshot.repository?.defaultBranch!==request.defaultBranch)fail('release repository');
   const wait=reason=>({status:'WAIT',reason,nextCheckAt:null,publishInvoked:false});
   if(command==='candidate') {
-    const history=await inspectRepositoryHistory(request,{token,io,completionReader:completionReader??(centralIo?cycle=>readNativeCompletion(request,cycle,{io,centralIo,now}):undefined),now});
-    if(history.result!=='PASS')return {status:history.result,reason:'HISTORICAL_OBLIGATIONS',history,publishInvoked:false};
     const {nativeReleaseCandidate}=await import('./release-candidate.mjs');
-    return {...await nativeReleaseCandidate(request,{token,readToken:candidateReadToken,copilotToken,controllerSha,controllerDirectory,now}),history,publishInvoked:false};
+    return nativeReleaseCandidate(request,{...candidateRuntime,token,readToken:candidateReadToken,copilotToken,controllerSha,controllerDirectory,now,
+      verifyHandoff:async cycle=>{
+        const current=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId,includeHistory:false});
+        const reader=new NativeEvidenceReader(io,request.repository);
+        const defaultHead=(await reader.json(`commits/${encodeURIComponent(request.defaultBranch)}`)).sha;
+        const stateHead=(await reader.json('git/ref/heads/steward/release-state')).object?.sha;
+        const valid=stateHead===current.head&&current.repository.candidate?.prNumber===cycle.prNumber
+          &&!current.cycles.some(record=>record.value.id===cycle.id);
+        return {result:valid?'PASS':'UNKNOWN',inventoryComplete:valid,pendingHandoff:cycle.id,defaultHead,stateHead};
+      }});
   }
   let cycle=snapshot.cycles.find(record=>record.value.id===request.cycleId)?.value;
-  if(!cycle || snapshot.repository.activeCycleId!==cycle.id)fail('active cycle required');
+  if(!cycle)fail('registered cycle required');
   if(command==='publish') {
     if(!centralIo||!centralInvocation)return wait('CENTRAL_PUBLICATION_CONTEXT_REQUIRED');
+    // Serialize central writes across registered versions. Channel Runs do not own this gate.
+    for(const {value:other} of snapshot.cycles) {
+      if(other.id===cycle.id)continue;
+      const records=snapshot.domainRecords.filter(record=>record.path.startsWith('evidence/publication/')&&record.value.cycleId===other.id);
+      if(!other.publications.length&&!records.length)continue;
+      const facts=await inspectPublications({repository:request.repository,repositoryId:request.repositoryId,appBotId:request.appBotId,cycle:other},records,io,centralIo,now());
+      if(!facts.native.complete||facts.missing.length)return {status:'UNKNOWN',reason:'PUBLICATION_WRITE_UNRECONCILED',publishInvoked:false};
+      if(facts.native.attempts.some(item=>item.status!=='completed'&&item.invocations.some(inv=>inv.evidence.outcome!=='EFFECT_CONFIRMED')))
+        return wait('PUBLICATION_IN_FLIGHT');
+      const outcomes=[...facts.native.attempts,...(facts.archived??[]).map(item=>item.attempt)].flatMap(item=>item.invocations.map(inv=>inv.evidence.outcome));
+      if(outcomes.some(value=>value===null||value==='UNKNOWN'||value==='FACT_CONFLICT'))
+        return {status:'UNKNOWN',reason:'PUBLICATION_WRITE_UNRECONCILED',publishInvoked:false};
+
+    }
+
     if(publisher)return inspectReleaseEvidence(request,{token,io,centralIo,centralInvocation,publisher,now});
     return publishNativeCycle(request,{token,io,centralIo,centralInvocation,controllerDirectory,now});
   }
@@ -746,7 +853,7 @@ export async function releaseCommand(command,request,{token,io=nativeEvidenceTra
     else if(selected.kind==='reselect') {
       const original=selected.request,executionSha=(await native(`commits/${encodeURIComponent(request.defaultBranch)}`)).sha;
       dispatch=prepareChannelDispatch(context,original.workflowId,request.defaultBranch,executionSha,original.inputs.mode,JSON.parse(original.inputs.targets_json),now());
-      if(original.continuationOfRunId!==null) {const proof=snapshot.domainRecords.find(record=>record.path===original.retryLimitEvidencePath);dispatch=prepareContinuation(context,proof,snapshot.domainRecords.filter(record=>record.path.startsWith('evidence/native/')),now(),{ref:request.defaultBranch,sha:executionSha});}
+      if(original.continuationOfRunId!==null)return {status:'BLOCKED',reason:'NATIVE_MAINTENANCE_REQUIRED',publishInvoked:false};
       cycle.dispatches.push(dispatch);
     }
     else {
@@ -754,11 +861,6 @@ export async function releaseCommand(command,request,{token,io=nativeEvidenceTra
       if(workflow.path!=='.github/workflows/steward-release-channels.yml'||workflow.state!=='active')fail('channel workflow identity');
       dispatch=prepareChannelDispatch(context,workflow.id,request.defaultBranch,executionSha,selected.mode,selected.targets,now());cycle.dispatches.push(dispatch);
     }
-  }
-  if(command==='dispatch-channel'&&dispatch?.canonicalRunId!==null&&dispatch) {
-    const proof=snapshot.domainRecords.filter(record=>record.path.startsWith('evidence/retry-limit/')&&record.value.terminalRun.id===dispatch.canonicalRunId).at(-1);
-    if(proof) {dispatch=prepareContinuation({repository:request.repository,repositoryId:request.repositoryId,appBotId:request.appBotId,cycle},proof,
-      snapshot.domainRecords.filter(record=>record.path.startsWith('evidence/native/')),now(),{ref:request.defaultBranch,sha:(await native(`commits/${encodeURIComponent(request.defaultBranch)}`)).sha});cycle.dispatches.push(dispatch);}
   }
   if(!dispatch) {
     if(command!=='dispatch-build')return wait('CHANNEL_PROBE_REQUIRED');
@@ -808,7 +910,7 @@ export async function releaseCommand(command,request,{token,io=nativeEvidenceTra
     const written=await writeReleaseRecords({directory:nextDirectory,remote:request.remote,repositoryId:request.repositoryId,defaultBranch:request.defaultBranch,
       targetRef:'steward/release-state',writer:'release',expectedHead:snapshot.head,allowedPaths:changes.map(file=>file.path),changes,identity:request.identity},{token});
     if(!['APPLIED','UNCHANGED'].includes(written.status))return written;
-    const readback=await readReleaseRecords({directory:nextDirectory,targetRef:'steward/release-state',repositoryId:request.repositoryId});
+    const readback=await readReleaseRecords({directory:nextDirectory,targetRef:'steward/release-state',repositoryId:request.repositoryId,includeHistory:false});
     if(readback.head!==written.head||JSON.stringify(readback.cycles.find(value=>value.value.id===cycle.id)?.value)!==JSON.stringify(nextCycle))return {status:'CONFLICT',head:readback.head};
     // Distinct callers must not both send when disjoint receipt files can be rebased.
     // A nonce distinguishes transport ownership, never a future Run or business attempt.
@@ -857,7 +959,7 @@ export async function main(argv=process.argv.slice(2)) {
   if(!['read','check'].includes(argv[0])||argv.length!==9)throw new Error('RELEASE_RECORD: read/check arguments');
   const args={};for(let i=1;i<argv.length;i+=2){const key=argv[i];if(!['--directory','--target-ref','--repository-id','--output'].includes(key)||Object.hasOwn(args,key)||!argv[i+1])throw new Error('RELEASE_RECORD: arguments');args[key]=argv[i+1];}
   if(!/^[1-9][0-9]*$/.test(args['--repository-id']))throw new Error('RELEASE_RECORD: repository ID');
-  const result=await readReleaseRecords({directory:args['--directory'],targetRef:args['--target-ref'],repositoryId:Number(args['--repository-id'])});
+  const result=await readReleaseRecords({directory:args['--directory'],targetRef:args['--target-ref'],repositoryId:Number(args['--repository-id']),includeHistory:args['--target-ref']!=='steward/release-state'});
   await writeFile(args['--output'],JSON.stringify(result,null,2)+'\n',{flag:'wx'});
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)main().then(result=>{
@@ -870,17 +972,12 @@ function retainedChannelReads(context,snapshot,now) {
 
 /** Re-read formal bytes and native source before using retained consumption proofs to close a cycle. */
 export async function readNativeCompletion(request,cycle,{io,centralIo,now=()=>new Date().toISOString()}) {
-  const snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId});
+  const snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId,includeHistory:false});
   const context={repository:request.repository,repositoryId:request.repositoryId,appBotId:request.appBotId,cycle},observedAt=now();
   await verifyContinuationReleases(context,io);
   const probe=retainedChannelReads(context,snapshot,observedAt);
-  if(probe.reads.length!==cycle.requiredChannels.length)fail('fresh channel observation required');
   const publications=snapshot.domainRecords.filter(record=>record.path.startsWith('evidence/publication/')&&record.value.cycleId===cycle.id);
   const publication=await inspectPublications(context,publications,io,centralIo,observedAt);
-  const evidence=await inspectNativeCycle(context,snapshot.domainRecords.filter(record=>record.path.startsWith('evidence/native/')),io,observedAt,
-    {complete:true,observations:snapshot.domainRecords.filter(record=>record.path.startsWith('evidence/reads/')).map(record=>record.value),publication,
-      channelEvidence:snapshot.domainRecords.filter(record=>record.path.startsWith('evidence/channel/')||record.path.startsWith('evidence/channel-read/')),sourceRejections:snapshot.domainRecords.filter(record=>record.path.startsWith('evidence/source-rejection/')),retryLimits:snapshot.domainRecords.filter(record=>record.path.startsWith('evidence/retry-limit/'))});
-  const budget=evidence.budget;
   const source={repositoryId:request.repositoryId,cycleId:cycle.id,sourceSha:cycle.sourceSha,deliveryConfigSha:cycle.deliveryConfigSha,
     units:cycle.units.map(unit=>({id:unit.id,version:unit.version,tag:unit.tag,releaseId:unit.releaseId,authorId:request.appBotId,manifestDigest:unit.manifestDigest,notesDigest:unit.notesDigest,
       assets:unit.assets.map(({path,size,sha256})=>({path,size,sha256}))})),requiredChannels:cycle.requiredChannels.map(channel=>{
@@ -888,17 +985,19 @@ export async function readNativeCompletion(request,cycle,{io,centralIo,now=()=>n
       return {...channel,version:unit.version,digest:unit.manifestDigest,inputDigest:channelTargetsDigest(context,[target]),private:false};
     })};
   const observation={source,sourceComplete:true,observedAt,releasesComplete:true,channelsComplete:true,releases:[],channels:[],consumptions:[],
-    inFlightWaveKeys:budget.inFlightWaveKeys,unknownWriteKeys:[...budget.unknownEvidence,...budget.conflictEvidence]};
+    inFlightWaveKeys:publication.native.attempts.filter(item=>item.status!=='completed'&&item.invocations.some(inv=>inv.evidence.outcome!=='EFFECT_CONFIRMED')).map(item=>`run:${item.runId}:${item.runAttempt}`),unknownWriteKeys:publication.missing};
+  if(!publication.native.complete||publication.missing.length)observation.releasesComplete=false;
   const provenance=new Map(),add=file=>{provenance.set(file.path,{path:file.path,digest:sha256(file.content),sourceUrl:`https://api.github.com/repos/${request.repository}/git/commits/${file.commit}`,observedAt:file.value.observedAt});return sha256(file.content);};
   for(const unit of source.units) {
     const raw=publications.filter(file=>file.value.objects.some(object=>object.unitId===unit.id&&object.releaseId===unit.releaseId&&object.status==='MATCH')).sort((a,b)=>b.value.observedAt.localeCompare(a.value.observedAt))[0];
     if(!raw)fail('native publication proof required');
+    if(!publication.files.some(file=>JSON.parse(file.content).objects.some(object=>object.unitId===unit.id&&object.releaseId===unit.releaseId&&object.status==='MATCH')))observation.releasesComplete=false;
     const {id,...fields}=unit;observation.releases.push({...fields,unitId:id,sourceSha:cycle.sourceSha,draft:false,immutable:true,evidenceDigest:add(raw)});
   }
   for(const channel of source.requiredChannels) {
     const read=probe.reads.find(read=>read.unitId===channel.unitId&&read.channelId===channel.channelId);
     const readFile=probe.files.get(JSON.stringify([channel.unitId,channel.channelId]))?.file;
-    if(!read||!readFile)fail('native channel read required');
+    if(!read||!readFile)continue;
     const files=snapshot.domainRecords.filter(file=>file.path.startsWith('evidence/channel/')&&file.value.kind==='RESULT'&&file.value.cycleId===cycle.id);
     const verified=[];
     for(const file of files) {
@@ -926,16 +1025,15 @@ export async function readNativeCompletion(request,cycle,{io,centralIo,now=()=>n
 export async function observeReleaseChannels(request,{token,io,centralIo,controllerDirectory,oras,now=()=>new Date().toISOString()}) {
   const root=await mkdtemp(join(tmpdir(),'steward-channel-read-'));
   try {
-    let snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId});
-  assertRepositoryWrite(snapshot.repository);
-  const recovered=await recoverReleaseCaches(request,snapshot,{token,io,centralIo,now});snapshot=recovered.snapshot;request={...request,directory:recovered.directory};
+    let snapshot=await readReleaseRecords({directory:request.directory,targetRef:'steward/release-state',repositoryId:request.repositoryId,includeHistory:false});
+  const recovered=await recoverReleaseCaches(request,snapshot,{token,io,centralIo,now});snapshot=recovered.snapshot;request={...request,directory:recovered.directory};assertRepositoryWrite(snapshot.repository);
     const cycle=structuredClone(snapshot.cycles.find(record=>record.value.id===request.cycleId)?.value);
     if(!cycle||cycle.units.some(unit=>unit.releaseId===null))return {status:'WAIT',reason:'FORMAL_RELEASE_REQUIRED'};
     const context={repository:request.repository,repositoryId:request.repositoryId,appBotId:request.appBotId,cycle};
     const normalized=await ensureCycleDelivery(request,snapshot,cycle,{token,io,centralIo,now});snapshot=normalized.snapshot;request={...request,directory:normalized.directory};
     await verifyContinuationReleases(context,io);
     const observed=cycle.requiredChannels.length?await observeNativeChannels(context,snapshot.domainRecords.filter(record=>record.path.startsWith('evidence/channel/')||record.path.startsWith('evidence/channel-read/')||record.path.startsWith('evidence/normalized-delivery/')),
-      root,controllerDirectory,token,io,now(),oras):{files:[],results:[],reads:[],probe:'OBSERVED'};
+      root,controllerDirectory,token,io,now(),oras).catch(()=>({files:[],results:[],reads:[],probe:'UNKNOWN'})):{files:[],results:[],reads:[],probe:'OBSERVED'};
     for(const {item,evidence,path} of observed.results) {
       let fact=cycle.channelFacts.find(fact=>fact.unitId===item.unitId&&fact.channelId===item.channelId);
       if(!fact) {fact={unitId:item.unitId,channelId:item.channelId,nativeObjectId:null,nativeUrl:null,inputDigest:channelTargetsDigest(context,[{unitId:item.unitId,channelId:item.channelId,version:item.version,releaseId:item.releaseId,manifestDigest:item.manifestDigest}]),
@@ -946,14 +1044,13 @@ export async function observeReleaseChannels(request,{token,io,centralIo,control
         verificationRunId:item.consumed?evidence.run.id:fact.verificationRunId,verifiedEvidencePath:item.consumed?path:fact.verifiedEvidencePath,observedAt:item.observedAt});
     }
     const saved=await adoptReleaseCycle(request,snapshot,cycle,{token,io},observed.files);snapshot=saved.snapshot;request={...request,directory:saved.directory};
-    if(observed.probe!=='OBSERVED')return {status:'WAIT',reason:'CHANNEL_PROBE_'+observed.probe};
     let value;
     try {value=await readNativeCompletion(request,cycle,{io,centralIo,now});}catch{return {status:'UNKNOWN',reason:'COMPLETION_EVIDENCE_REQUIRED'};}
     const verdict=evaluateCompletion(value.source,value.observation,now());
-    if(verdict.result!=='PASS')return {status:verdict.result,reason:'CHANNEL_OBLIGATIONS',completion:verdict};
+    if(verdict.result!=='PASS')return {status:verdict.result,reason:'MAIN_RELEASE_OBLIGATIONS',completion:verdict};
     const file=completionFile(value);cycle.completedEvidencePath=file.path;
     if(!cycle.completionObservations.some(item=>item.evidencePath===file.path))cycle.completionObservations.push({inputSetDigest:sha256(JSON.stringify(value.source)),evidenceSetDigest:sha256(JSON.stringify(value.observation)),observedAt:value.observation.observedAt,evidencePath:file.path});
     const complete=await adoptReleaseCycle(request,snapshot,cycle,{token,io},[file]);
-    return {status:'OBSERVED',reason:'CYCLE_COMPLETION_VERIFIED',archiveHead:complete.snapshot.head,completion:verdict};
+    return {status:'OBSERVED',reason:verdict.distributionResult==='PASS'?'DISTRIBUTION_VERIFIED':'MAIN_RELEASE_VERIFIED',archiveHead:complete.snapshot.head,completion:verdict};
   }finally{await rm(root,{recursive:true,force:true});}
 }
