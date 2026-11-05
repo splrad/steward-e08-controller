@@ -30,7 +30,7 @@ it('activates the trusted policy tool paths before validation outside its checko
   for(const job of Object.values(d.jobs) as any[]){
     const installed=job.steps.findIndex((s:any)=>s.uses?.startsWith('jdx/mise-action@'));
     if(installed<0)continue;
-    const activated=job.steps.findIndex((s:any)=>s.run==='mise bin-paths >> "$GITHUB_PATH"');
+    const activated=job.steps.findIndex((s:any)=>s.run==='mise bin-paths | tac >> "$GITHUB_PATH"');
     expect(activated).toBeGreaterThan(installed);
     expect(job.steps[activated]).toMatchObject({'working-directory':'policy',shell:'bash',env:{MISE_SAFE:'1',MISE_LOCKED:'1',MISE_NODE_COMPILE:'false'}});
     expect(job.steps[installed].with.env).toBe(false);
