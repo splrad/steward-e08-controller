@@ -10,7 +10,7 @@ on:
 permissions: {}
 jobs:
   synthetic-business:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -31,7 +31,7 @@ jobs:
           CONTROLLER: ${{ inputs.controller_sha }}
         run: node controller/e08-business-failure.mjs
   automation-health:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}
     steps:
