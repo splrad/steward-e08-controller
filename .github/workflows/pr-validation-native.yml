@@ -55,6 +55,7 @@ jobs:
         env:
           MISE_SAFE: '1'
           MISE_LOCKED: '1'
+          MISE_NODE_COMPILE: 'false'
         run: mise bin-paths >> "$GITHUB_PATH"
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: policy
@@ -140,6 +141,7 @@ jobs:
         env:
           MISE_SAFE: '1'
           MISE_LOCKED: '1'
+          MISE_NODE_COMPILE: 'false'
         run: mise bin-paths >> "$GITHUB_PATH"
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: policy
@@ -240,6 +242,7 @@ jobs:
         env:
           MISE_SAFE: '1'
           MISE_LOCKED: '1'
+          MISE_NODE_COMPILE: 'false'
         run: mise bin-paths >> "$GITHUB_PATH"
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: policy
@@ -357,6 +360,7 @@ jobs:
         env:
           MISE_SAFE: '1'
           MISE_LOCKED: '1'
+          MISE_NODE_COMPILE: 'false'
         run: mise bin-paths >> "$GITHUB_PATH"
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: policy
@@ -443,6 +447,7 @@ jobs:
         env:
           MISE_SAFE: '1'
           MISE_LOCKED: '1'
+          MISE_NODE_COMPILE: 'false'
         run: mise bin-paths >> "$GITHUB_PATH"
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: policy
@@ -496,6 +501,7 @@ jobs:
         env:
           MISE_SAFE: '1'
           MISE_LOCKED: '1'
+          MISE_NODE_COMPILE: 'false'
         run: mise bin-paths >> "$GITHUB_PATH"
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: policy

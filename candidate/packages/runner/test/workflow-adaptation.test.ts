@@ -32,7 +32,7 @@ it('activates the trusted policy tool paths before validation outside its checko
     if(installed<0)continue;
     const activated=job.steps.findIndex((s:any)=>s.run==='mise bin-paths >> "$GITHUB_PATH"');
     expect(activated).toBeGreaterThan(installed);
-    expect(job.steps[activated]).toMatchObject({'working-directory':'policy',shell:'bash',env:{MISE_SAFE:'1',MISE_LOCKED:'1'}});
+    expect(job.steps[activated]).toMatchObject({'working-directory':'policy',shell:'bash',env:{MISE_SAFE:'1',MISE_LOCKED:'1',MISE_NODE_COMPILE:'false'}});
     expect(job.steps[installed].with.env).toBe(false);
     const execution=job.steps.findIndex((s:any)=>/^(?:npm|node)\b/m.test(s.run??''));
     expect(activated).toBeLessThan(execution);
