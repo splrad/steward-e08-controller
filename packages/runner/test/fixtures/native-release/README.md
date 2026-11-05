@@ -9,9 +9,9 @@
 
 | 文件 | ProductVersion | SHA-256 |
 | --- | --- | --- |
-| `fixture.dll` | `1.2.3+fixture` | `2b97c45b461b5480e6ce9b5fc9c19c58efc7b54bcf08b0936e51babec048d220` |
-| `fixture-0.dll` | `1.2.3.0` | `7e4f4f7a7702f3e34db898d23e9be66387bb10154f6fcd3c00048698519d8892` |
-| `fixture-4.dll` | `1.2.3.4` | `da3eb530079a7aab000093396de17c3a60fc2a90fd9f629f0a68d384e34b1c36` |
+| `fixture.dll` | `1.2.3+fixture` | `d7411737748ad256a7561067a87f6d86d0b617aea71a7e0e967d76228820e6d8` |
+| `fixture-0.dll` | `1.2.3.0` | `adcc3c586cac18b1b4bb4f7c390f329fc948949c071ad5611ab90f2a36e12b2c` |
+| `fixture-4.dll` | `1.2.3.4` | `4d9113fc01116c37311ac3776c370ae74d13335659b2aadf7f54e469d196e736` |
 
 ## 重新生成
 
@@ -28,7 +28,7 @@ dotnet build "$fixtureSource/NativeFixture.csproj" -o "$fixtureOutput/nonzero" '
 按顺序将三个输出目录中的 `NativeFixture.dll` 保存为 `fixture.dll`、`fixture-0.dll`、`fixture-4.dll`。
 保留正常用户目录或项目既有隔离用户目录配置；生成不需要凭据。
 生成后用 `System.Diagnostics.FileVersionInfo` 核对版本，记录 `Get-FileHash -Algorithm SHA256`，并运行既有 `release-native.test.ts`。
-源码启用确定性编译、固定源路径映射，并关闭 Git revision 自动追加；以上记录绑定本次实际字节，尚未通过第二次独立生成宣称逐字节重现。
+源码启用确定性编译、固定源路径映射，并关闭 Git revision 自动追加；本次最终 DLL 由上述仓库 LF 源码在独立临时目录生成，以上哈希绑定实际采用的文件；不声称已证明跨目录逐字节复现。
 
 ## 方法参考
 
