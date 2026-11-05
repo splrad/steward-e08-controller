@@ -152,3 +152,26 @@ it('does not adopt a discovered draft when the next inventory page is denied',as
   expect(JSON.parse(p.files[0]!.content).objects[0].releaseId).toBeNull();
   expect((await inspectNativeCycle(f.context,[],io,NOW,{complete:true,observations:[],publication:p})).currentFacts.unknownEvidence.length).toBeGreaterThan(0);
 });
+
+it.each(['stable','run-changed','attempt-changed'] as const)('compares each native endpoint with itself when Run and attempt creation differ by one second: %s',async mode=>{
+  const f=fixture(),original=f.centralIo.request;let checking=false,runReads=0,attemptReads=0;
+  f.centralIo.request=async(method,path,...args)=>{
+    if(path.endsWith('/actions/runs/900')||path.endsWith('/actions/runs/900/attempts/1')) {
+      const attempt=path.endsWith('/attempts/1'),value={...f.run};
+      if(attempt)value.created_at=new Date(Date.parse(f.run.created_at)+1000).toISOString();
+      if(checking) {
+        if(attempt)attemptReads++;else runReads++;
+        if(mode==='run-changed'&&!attempt&&runReads===3||mode==='attempt-changed'&&attempt&&attemptReads===2)
+          value.updated_at=new Date(Date.parse(f.run.updated_at)+1000).toISOString();
+      }
+      return f.response(value);
+    }
+    return original(method,path,...args);
+  };
+  await invokePublication(f.context,f.current,[],f.store,f.productIo,f.centralIo,async()=>{f.setExists();},NOW,()=>NOW);
+  f.terminal();checking=true;
+  const result=await inspectPublications(f.context,f.history,f.productIo,f.centralIo,NOW);
+  expect(result.native.complete).toBe(mode==='stable');
+  expect(result.missing).toEqual(mode==='stable'?[]:['publication:900:native-evidence']);
+  if(mode==='stable')expect(result.native.attempts[0]!.invocations[0]!.evidence.outcome).toBe('EFFECT_CONFIRMED');
+});
