@@ -104,8 +104,9 @@ export async function inspectPublications(context:EvidenceContext,history:Public
     try {
       const reader=new NativeEvidenceReader(centralIo,central);
       let actuals:{run:NativePublication['centralRun'];jobs:NativePublication['job'][]}[]=[],expiredCommit:string|null=null;
+      let initialRun:NativePublication['centralRun']|undefined;
       try {
-        const latest=nativeRunFact(await reader.json(`actions/runs/${id}`));
+        const latest=nativeRunFact(await reader.json(`actions/runs/${id}`));initialRun=latest;
         for(let attempt=1;attempt<=latest.runAttempt;attempt++) {
           const actual=await centralAttempt(centralIo,id,attempt);actuals.push({run:actual.run,jobs:actual.jobs});
         }
@@ -144,7 +145,7 @@ export async function inspectPublications(context:EvidenceContext,history:Public
           observedAt,jobsComplete:true,jobs:selectedJobs,invocations,sourceUrl:`https://api.github.com/repos/${central}/actions/runs/${id}/attempts/${attempt}`,evidenceDigest:hash(JSON.stringify(actual))};
         if(expiredCommit)archived.push({stateCommit:expiredCommit,rawDigest:hash(JSON.stringify(observed)),attempt:observed});else native.attempts.push(observed);
       }
-      if(!expiredCommit)check(same(latest,nativeRunFact(await reader.json(`actions/runs/${id}`))),'central Run changed');
+      if(!expiredCommit)check(same(initialRun,nativeRunFact(await reader.json(`actions/runs/${id}`))),'central Run changed');
       native.runs.push({runId:id,workflowId:latest.workflowId,entry:'publish',sourceSha:context.cycle.sourceSha,inputDigest,actorId:latest.actorId,latestAttempt:latest.runAttempt,availability:expiredCommit?'expired':'live'});
     }catch{native.complete=false;missing.push(`publication:${id}:native-evidence`);}
   }
