@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, rm, writeFile, copyFile, open } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { nativeReleaseInspector } from '../src/release-native.js';
+import { nativeInspectionTimeoutMs, nativeReleaseInspector } from '../src/release-native.js';
 import { collectFileBuildManifest } from '../src/build-manifest.js';
 import { BuildContractError, type BuildArtifactInput } from '../../core/src/build-manifest.js';
 import { isolatedBuildEnvironment } from '../src/build-environment.js';
@@ -48,7 +48,7 @@ Archive 'script.zip' 'run.ps1' ([Text.Encoding]::ASCII.GetBytes('exit 0'))
 `);
     permitOfflineScript(join(root, 'fixture.ps1'));
     await promisify(execFile)('pwsh', ['-NoProfile', '-File', join(root, 'fixture.ps1'), root], { env: isolatedBuildEnvironment(process.env, root), timeout: 30000, windowsHide: true });
-  }, 90000);
+  }, 3 * 60_000 + 30_000 + 30_000); // Three builds, archive creation, and a 30-second completion margin.
   afterAll(async () => { if (root && resolve(root).startsWith(join(resolve(tmpdir()), 'native-release-test-'))) await rm(root, { recursive: true }); });
   const inspect = () => nativeReleaseInspector(resolve('scripts/inspect-native-release.ps1'), root);
   it('reads the public PE version and each DLL inside the archive', async () => {
@@ -109,4 +109,4 @@ it.skipIf(process.platform !== 'win32')('classifies successful malformed output 
   const error = await nativeReleaseInspector(script, root).inspectPath!('fixture.zip').catch(e => e);
   expect(error).not.toBeInstanceOf(BuildContractError); expect(error.code).toBe(3);
  } finally { await rm(root, {recursive:true}); }
-}, 30_000); // Two real PowerShell launches can exceed five seconds on hosted Windows.
+}, 2 * nativeInspectionTimeoutMs + 30_000); // Both bounded inspections plus a 30-second cleanup margin.
