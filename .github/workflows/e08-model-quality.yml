@@ -22,6 +22,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   quality-summary:
+    permissions:
+      contents: read
+      copilot-requests: write
     if: github.repository == 'splrad/steward-e08-controller' && github.repository_id
       == '1440689456' && github.ref == format('refs/heads/{0}',
       github.event.repository.default_branch)
@@ -35,15 +38,28 @@ jobs:
         with:
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
-      - name: Production subprocess with synthetic SDK
+      - name: Observe native token source without model requests
         env:
-          STEWARD_COPILOT_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
-          STEWARD_APP_PRIVATE_KEY: ${{ secrets.STEWARD_APP_PRIVATE_KEY }}
-          E08_RELEASE_ONLY: ${{ secrets.E08_RELEASE_ONLY }}
-          E08_NOTES_ONLY: ${{ secrets.E08_NOTES_ONLY }}
-          E08_EXPECTED_REVISION: ${{ inputs.quality_revision }}
-          E08_ACCEPTED_REVISIONS: ${{ inputs.accepted_revisions }}
-        run: node e08-environment/environment-worker.mjs quality
+          STEWARD_COPILOT_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { mkdir, writeFile } from 'node:fs/promises';
+          if (!process.env.STEWARD_COPILOT_TOKEN) throw new Error('NATIVE_TOKEN_MISSING');
+          const result = {
+            scope: 'GitHub Actions token source observation; no Copilot service request',
+            repository: process.env.GITHUB_REPOSITORY,
+            ref: process.env.GITHUB_REF,
+            sha: process.env.GITHUB_SHA,
+            runId: process.env.GITHUB_RUN_ID,
+            attempt: process.env.GITHUB_RUN_ATTEMPT,
+            job: process.env.GITHUB_JOB,
+            tokenPresent: true,
+            modelRequests: 0
+          };
+          await mkdir('e08-results', { recursive: true });
+          await writeFile('e08-results/quality-native-source.json', JSON.stringify(result, null, 2) + '\n');
+          console.log(JSON.stringify(result));
+          NODE
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: environment-quality-${{ github.run_id }}-${{ github.run_attempt }}
