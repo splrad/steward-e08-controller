@@ -168,8 +168,8 @@ checksum = "sha256:dcc60d59a0746999f99064a01c020445d54d84228c691cdbf25b49ac3b591
 url = "https://nodejs.org/dist/v26.13.0/node-v26.13.0-win-x64.zip"
 
 [[tools.npm]]
-version = "12.2.1"
-aube = { path = ".mise/locks/npm/12.2.1", digest = "sha256:444df8e4844b0bbac73752177bb8845de4e60958e82ec8d0e7814d64871aa13e" }
+version = "12.2.2"
+aube = { path = ".mise/locks/npm/12.2.2", digest = "sha256:aa1583eaec25bbf8f161baebcfb3b9500e918a9d0772b3278c80b0e57b96c69a" }
 backend = "npm:npm"
 specifiers = ["latest"]
 
