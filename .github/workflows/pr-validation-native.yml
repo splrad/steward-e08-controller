@@ -38,7 +38,7 @@ jobs:
           path: target
           fetch-depth: 0
           persist-credentials: false
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
         env:
           MISE_SAFE: '1'
           MISE_NODE_COMPILE: 'false'
@@ -124,7 +124,7 @@ jobs:
           path: target
           fetch-depth: 0
           persist-credentials: false
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
         env:
           MISE_SAFE: '1'
           MISE_NODE_COMPILE: 'false'
@@ -225,7 +225,7 @@ jobs:
           path: target
           fetch-depth: 0
           persist-credentials: false
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
         env:
           MISE_SAFE: '1'
           MISE_NODE_COMPILE: 'false'
@@ -343,7 +343,7 @@ jobs:
           path: target
           fetch-depth: 0
           persist-credentials: false
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
         env:
           MISE_SAFE: '1'
           MISE_NODE_COMPILE: 'false'
@@ -430,7 +430,7 @@ jobs:
           path: target
           fetch-depth: 0
           persist-credentials: false
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
         env:
           MISE_SAFE: '1'
           MISE_NODE_COMPILE: 'false'
@@ -484,7 +484,7 @@ jobs:
           ref: ${{ job.workflow_sha }}
           path: policy
           persist-credentials: false
-      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
         env:
           MISE_SAFE: '1'
           MISE_NODE_COMPILE: 'false'
