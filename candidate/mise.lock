@@ -3,37 +3,37 @@
 lockfile_version = 3
 
 [[tools."aqua:anchore/syft"]]
-version = "1.56.0"
+version = "1.57.1"
 backend = "aqua:anchore/syft"
 specifiers = ["latest"]
 
 [tools."aqua:anchore/syft"."platforms.linux-x64"]
-checksum = "sha256:1c2493cfcf52d3367d6cb25780d9190c111c2219c34c820574c43e8bae15c528"
-url = "https://github.com/anchore/syft/releases/download/v1.56.0/syft_1.56.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/anchore/syft/releases/assets/702477601"
+checksum = "sha256:bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c"
+url = "https://github.com/anchore/syft/releases/download/v1.57.1/syft_1.57.1_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/anchore/syft/releases/assets/727815727"
 provenance = "cosign"
 
 [tools."aqua:anchore/syft"."platforms.windows-x64"]
-checksum = "sha256:c4cd2846dc0128e29a947bc6f56e1e5ef01707275b0e58590fbe48105198661d"
-url = "https://github.com/anchore/syft/releases/download/v1.56.0/syft_1.56.0_windows_amd64.zip"
-url_api = "https://api.github.com/repos/anchore/syft/releases/assets/702477600"
+checksum = "sha256:3a01fe865076bb548352195b77e88fa4649277861ea458efe165c3a810b6dcc7"
+url = "https://github.com/anchore/syft/releases/download/v1.57.1/syft_1.57.1_windows_amd64.zip"
+url_api = "https://api.github.com/repos/anchore/syft/releases/assets/727815731"
 provenance = "cosign"
 
 [[tools."aqua:astral-sh/ruff"]]
-version = "0.17.3"
+version = "0.17.4"
 backend = "aqua:astral-sh/ruff"
 specifiers = ["latest"]
 
 [tools."aqua:astral-sh/ruff"."platforms.linux-x64"]
-checksum = "sha256:2b0890f5a55900af741f133918c2656919bbf18c2ab7741b4ca8403a90e647a9"
-url = "https://github.com/astral-sh/ruff/releases/download/0.17.3/ruff-x86_64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/astral-sh/ruff/releases/assets/679956535"
+checksum = "sha256:3ab2b34aeacdbc1ea5c529cdbda3e05792633d587228123fd09f3b5a0facb27a"
+url = "https://github.com/astral-sh/ruff/releases/download/0.17.4/ruff-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/ruff/releases/assets/714447482"
 provenance = "github-attestations"
 
 [tools."aqua:astral-sh/ruff"."platforms.windows-x64"]
-checksum = "sha256:a84d9ac74af8ef5bac84a1888a1634df18e6e985e2f930d35c052beacd00e813"
-url = "https://github.com/astral-sh/ruff/releases/download/0.17.3/ruff-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/astral-sh/ruff/releases/assets/679956524"
+checksum = "sha256:d37f57c7a0cfb8ed5a39adc96f7a0a63767b3c5abe4629c4c84e33c06da46885"
+url = "https://github.com/astral-sh/ruff/releases/download/0.17.4/ruff-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/astral-sh/ruff/releases/assets/714447463"
 provenance = "github-attestations"
 
 [[tools."aqua:astral-sh/uv"]]
@@ -135,20 +135,20 @@ url_api = "https://api.github.com/repos/zizmorcore/zizmor/releases/assets/703541
 provenance = "github-attestations"
 
 [[tools."github:jdx/jactionlint"]]
-version = "2.4.0"
+version = "2.5.0"
 backend = "github:jdx/jactionlint"
 specifiers = ["latest"]
 
 [tools."github:jdx/jactionlint"."platforms.linux-x64"]
-checksum = "sha256:26ddba81db28fffc51163175c070ee1a9d1150260de4b5232f01d9b749f32d8e"
-url = "https://github.com/jdx/jactionlint/releases/download/v2.4.0/jactionlint_2.4.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/jdx/jactionlint/releases/assets/688130108"
+checksum = "sha256:5ac307b0499bb0eab45ae99c23e8e0790874fbc667c75224410954e0e3c6e0f5"
+url = "https://github.com/jdx/jactionlint/releases/download/v2.5.0/jactionlint_2.5.0_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/jdx/jactionlint/releases/assets/714298541"
 provenance = "github-attestations"
 
 [tools."github:jdx/jactionlint"."platforms.windows-x64"]
-checksum = "sha256:4e0c7b428a4faa35bb3b86af6fa65a0ac9797edcd4c64e4f7e16ca886437e172"
-url = "https://github.com/jdx/jactionlint/releases/download/v2.4.0/jactionlint_2.4.0_windows_amd64.zip"
-url_api = "https://api.github.com/repos/jdx/jactionlint/releases/assets/688130261"
+checksum = "sha256:6f6202d6fc476cbe3978c7dd2349c881cfcfa98257593cb2f1bde87004f054c6"
+url = "https://github.com/jdx/jactionlint/releases/download/v2.5.0/jactionlint_2.5.0_windows_amd64.zip"
+url_api = "https://api.github.com/repos/jdx/jactionlint/releases/assets/714298686"
 provenance = "github-attestations"
 
 [[tools.node]]
@@ -168,8 +168,8 @@ checksum = "sha256:dcc60d59a0746999f99064a01c020445d54d84228c691cdbf25b49ac3b591
 url = "https://nodejs.org/dist/v26.13.0/node-v26.13.0-win-x64.zip"
 
 [[tools.npm]]
-version = "12.2.1"
-aube = { path = ".mise/locks/npm/12.2.1", digest = "sha256:444df8e4844b0bbac73752177bb8845de4e60958e82ec8d0e7814d64871aa13e" }
+version = "12.2.2"
+aube = { path = ".mise/locks/npm/12.2.2", digest = "sha256:aa1583eaec25bbf8f161baebcfb3b9500e918a9d0772b3278c80b0e57b96c69a" }
 backend = "npm:npm"
 specifiers = ["latest"]
 
