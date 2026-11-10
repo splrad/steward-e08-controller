@@ -13,7 +13,7 @@ concurrency:
 jobs:
   scope:
     name: Validation scope
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     outputs:
       source: ${{ steps.scope.outputs.source }}
@@ -107,7 +107,7 @@ jobs:
     name: Source linux
     needs: scope
     if: needs.scope.outputs.source == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     env:
       VALIDATION_WORKSPACE: ${{ github.workspace }}/target
@@ -326,7 +326,7 @@ jobs:
     name: Governance scans
     needs: scope
     if: needs.scope.outputs.governance == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     env:
       VALIDATION_WORKSPACE: ${{ github.workspace }}/target
@@ -392,7 +392,7 @@ jobs:
     name: Dependency review
     needs: scope
     if: needs.scope.outputs.dependency == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
@@ -413,7 +413,7 @@ jobs:
     name: Documentation links
     needs: scope
     if: needs.scope.outputs.docs == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 25
     env:
       VALIDATION_WORKSPACE: ${{ github.workspace }}/target
@@ -475,7 +475,7 @@ jobs:
     name: SPLRAD Validation
     needs: [scope, source-linux, source-windows, governance, dependency, docs]
     if: ${{ always() }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

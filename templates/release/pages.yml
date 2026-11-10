@@ -32,7 +32,7 @@ env:
   STEWARD_DOCS_UNIT: ${{ vars.STEWARD_DOCS_UNIT }}
 jobs:
   select:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -72,7 +72,7 @@ jobs:
     name: build/${{ needs.select.outputs.input_digest }}
     needs: select
     if: needs.select.outputs.ready == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -109,7 +109,7 @@ jobs:
   deploy:
     name: deploy/${{ needs.select.outputs.input_digest }}
     needs: [select, build]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 25
     permissions:
       contents: read
