@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   source-check:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       targets_digest: ${{ steps.native.outputs.targets_digest }}
@@ -53,7 +53,7 @@ jobs:
   admit:
     needs: source-check
     if: inputs.mode != 'observe'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -83,7 +83,7 @@ jobs:
     name: channel-prepare
     needs: [source-check, admit]
     if: inputs.mode != 'observe'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     environment:
       name: channel-read
@@ -121,7 +121,7 @@ jobs:
     name: verify/${{ matrix.channelId }}/${{ matrix.unitId }}
     needs: [source-check, channel-prepare]
     if: inputs.mode == 'verify' && needs.channel-prepare.outputs.has_work == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     strategy:
       matrix: ${{ fromJSON(needs.channel-prepare.outputs.matrix) }}
@@ -161,7 +161,7 @@ jobs:
   observe:
     needs: source-check
     if: inputs.mode == 'observe'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     environment:
       name: channel-read
@@ -196,7 +196,7 @@ jobs:
   collect:
     needs: [source-check, admit, channel-prepare, verify, observe]
     if: always()
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - env:

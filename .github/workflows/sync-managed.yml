@@ -21,7 +21,7 @@ jobs:
       cancel-in-progress: false
       queue: max
     if: github.repository == 'splrad/steward-e08-controller' && github.repository_id == '1440689456' && github.ref == 'refs/heads/e08-channel-trunk'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     environment:
       name: e08-consumers
@@ -70,7 +70,7 @@ jobs:
   templates:
     needs: bootstrap
     if: github.repository == 'splrad/steward-e08-controller' && github.repository_id == '1440689456' && github.ref == 'refs/heads/e08-channel-trunk'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     environment:
       name: e08-consumers
@@ -122,7 +122,7 @@ jobs:
   candidate:
     needs: bootstrap
     if: inputs.consumer != 'templates' && github.repository == 'splrad/steward-e08-controller' && github.repository_id == '1440689456' && github.ref == 'refs/heads/e08-channel-trunk'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     environment:
       name: e08-consumers
@@ -170,7 +170,7 @@ jobs:
   quality:
     needs: templates
     if: inputs.consumer != 'templates' && github.repository == 'splrad/steward-e08-controller' && github.repository_id == '1440689456' && github.ref == 'refs/heads/e08-channel-trunk'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     environment:
       name: e08-consumers
